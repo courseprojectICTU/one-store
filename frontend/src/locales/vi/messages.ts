@@ -1,0 +1,15 @@
+export const messagesVi = {
+  add_to_cart_success: (name: string, size: string) => `Đã thêm ${name} (Cỡ ${size}) vào giỏ hàng`,
+  buy_now_redirect: (name: string) => `Chuyển đến thanh toán nhanh cho ${name}`,
+  order_success: 'Đặt hàng thành công!',
+  order_failed: 'Đặt hàng không thành công',
+  empty_cart_alert: 'Giỏ hàng của bạn đang trống',
+  fill_required_fields: 'Vui lòng điền đủ Tên, Số điện thoại và Địa chỉ giao hàng',
+  voucher_success: (code: string, discount: string) => `Áp dụng mã giảm giá ${code} thành công (-${discount})`,
+  voucher_invalid: 'Mã giảm giá không hợp lệ hoặc đã hết hạn',
+  wishlist_added: 'Đã thêm vào danh sách yêu thích',
+  wishlist_removed: 'Đã bỏ yêu thích sản phẩm',
+  login_required_wishlist: 'Vui lòng đăng nhập để thực hiện thao tác này',
+  stock_out_alert: 'Sản phẩm tạm thời hết hàng',
+  logout_success: 'Đã đăng xuất tài khoản',
+};

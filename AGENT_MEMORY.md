@@ -1,0 +1,1001 @@
+# AGENT MEMORY & PROJECT CONTEXT — ONE - STORE (ONE)
+
+> **File:** `AGENT_MEMORY.md`  
+> **Phiên làm việc:** 2026-10-31 đến 2026-11-02  
+> **Dự án:** One - Store (Tên ngắn: One)  
+> **Cơ sở mã nguồn:** `d:\HocTap\HK7\ChuyenDoiSo\project\nhom-2-ba-khi-shop`  
+> **Mục đích:** Lưu trữ toàn bộ bối cảnh, các quyết định kiến trúc (ADR), lịch sử thay đổi mã nguồn và quy chuẩn vận hành phục vụ các lượt agent làm việc tiếp theo.
+
+---
+
+## 1. TỔNG QUAN HÀNH TRÌNH NÂNG CẤP TRONG PHIÊN LÀM VIỆC
+
+Dự án đã trải qua hành trình nâng cấp toàn diện qua 27 cột mốc chuyển đổi kiến trúc và trải nghiệm người dùng:
+
+```
+[Bắt đầu] Cài đặt & chạy local -> Phân tích công nghệ
+   │
+   ▼
+[Giai đoạn 1-5] Tách Monorepo -> Next.js 16 Static Export -> Rebranding One-Store -> Hồ sơ Sneaker Âu-Á -> Logo Vector
+   │
+   ▼
+[Giai đoạn 6-10] Seed 12 Sneaker D1 -> Hệ thống hằng số chuỗi -> Zero-Emoji (lucide-react) -> Bố cục Thẻ Nổi -> Typography Outfit
+   │
+   ▼
+[Giai đoạn 11-15] Tách trang /products -> Khắc phục RSC txt 404 -> Navigation Links -> Cào 70 mẫu Sneaker R2 & Vectorize AI -> Khắc phục Chunk Cache 500
+   │
+   ▼
+[Giai đoạn 16-20] Chuẩn hóa 100% Ảnh Sneaker Studio -> Guest-First & Cookie Storage -> Banner Bred Aesthetic -> Model 3D Three.js Jordan 1 -> Top 4 Bestsellers
+   │
+   ▼
+[Giai đoạn 21-23] Tách trang riêng /orders -> Cải tiến chính sách Freeship từ 3 đôi -> Tối ưu Zod Schema chống lỗi 400 Bad Request
+   │
+   ▼
+[Giai đoạn 24-27] Tối ưu Cookie Consent & Thanh thông báo -> Đồng bộ 100% Song ngữ 1-1 VI-EN -> Dịch 115 màu sắc & 70 mô tả sản phẩm -> Hoàn thiện /orders Breadcrumb
+```
+
+---
+
+## 2. CÁC QUYẾT ĐỊNH KIẾN TRÚC QUAN TRỌNG (ADR)
+
+### ADR-01: Tách cấu trúc Monorepo `backend/` và `frontend/`
+- **Bối cảnh ban đầu:** Toàn bộ mã nguồn nằm lẫn lộn ở thư mục gốc (các file backend `.ts`, frontend `.html`, `.js`, file migration D1 nằm xen kẽ).
+- **Quyết định:** Tách dự án thành 2 phân hệ rõ ràng:
+  - `backend/`: Chứa mã nguồn Cloudflare Worker Hono API (`src/index.ts`, `src/commerce.ts`, `src/chatbot.ts`) và thư mục migrations D1 (`migrations/`).
+  - `frontend/`: Toàn bộ giao diện người dùng và ứng dụng web phía client.
+  - Root: Giữ file điều phối cấu hình chung (`package.json`, `wrangler.toml`, `tsconfig.json`, `.dev.vars`).
+
+### ADR-02: Nâng cấp Frontend sang Next.js App Router (Static Export)
+- **Bối cảnh:** Frontend ban đầu viết bằng HTML/CSS/JS thuần (Core). Yêu cầu chuyển sang Next.js hiện đại nhưng vẫn phục vụ qua Cloudflare Worker Edge.
+- **Quyết định:**
+  - Khởi tạo Next.js 16 trong thư mục `frontend/` với TypeScript, App Router và Turbopack.
+  - Cấu hình `output: "export"` trong `frontend/next.config.ts` để xuất file tĩnh ra thư mục `frontend/out/`.
+  - Cloudflare Worker tại backend phục vụ trực tiếp thư mục `frontend/out/` thông qua cấu hình `assets = { directory = "./frontend/out", binding = "ASSETS" }` trong `wrangler.toml`.
+  - Tách các components React có tính tái sử dụng cao (`Header`, `Hero`, `ProductSection`, `ProductCard`, `StoryBanner`, `Footer`, `CartDrawer`, `TrackingModal`, `ChatbotWidget`, `AdminDashboard`).
+  - Quản lý trạng thái thông qua `ShopContext` (`React.createContext`), đồng bộ với `localStorage` và `sessionStorage`.
+
+### ADR-03: Rebranding Thương hiệu sang One - Store (One)
+- **Yêu cầu:** Đổi tên project thành `one-store`, tên thương hiệu thành `One - Store`, tên ngắn gọn là `One`.
+- **Triển khai:**
+  - **Tên project (`one-store`)**: Cập nhật trong `package.json`, `frontend/package.json`, `wrangler.toml`, health check API `/api/health` (`service: "one-store"`).
+  - **Tên thương hiệu (`One - Store`)**: Cập nhật logo navbar, footer, copyright (`© 2026 One - Store`), metadata title (`One - Store | Giày Thể Thao & Sneaker Chính Hãng`), tiêu đề Admin dashboard, chatbot system prompt.
+  - **Tên ngắn gọn (`One`)**: Tên trợ lý chatbot `Tư vấn One`, tiêu đề banner `PHONG CÁCH ONE`, tiền tố mã đơn hàng `ONE-` (VD: `ONE-XXXXXX`), voucher mẫu `ONE10`.
+  - **Tương thích ngược (Backward Compatibility)**: Đổi key `localStorage` sang `one-store:cart:v1` kèm fallback đọc `one-fashion:cart:v1`, `sessionStorage` sang `one:member-token:v1`.
+  - **Lưu ý Cloudflare Resources:** Các tài nguyên đám mây đã cấp phát trên Cloudflare (D1 `fashion_db`, R2 bucket `nhom2-ba-khi-images`, Vectorize index `ba-khi-knowledge`) được giữ nguyên tên định danh đám mây trong `wrangler.toml`.
+
+### ADR-04: Thiết lập Store Giày Thể Thao Âu - Á & RAG Knowledge Base
+- **Bối cảnh:** Xây dựng hồ sơ thông tin ngắn gọn về cửa hàng giày thể thao chính hãng phân phối các thương hiệu Âu - Á nổi tiếng.
+- **Tài liệu:** Tạo [STORE_PROFILE.md](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/STORE_PROFILE.md).
+- **Thương hiệu Âu - Mỹ:** Nike (Mỹ), Adidas (Đức), New Balance (Mỹ), Puma (Đức), Salomon (Pháp).
+- **Thương hiệu Châu Á:** Asics (Nhật Bản), Onitsuka Tiger (Nhật Bản), Mizuno (Nhật Bản), Li-Ning (Trung Quốc), Anta (Trung Quốc).
+- **RAG Integration:** Nội dung này đã được nhập và vector hóa trực tiếp vào bảng `chat_documents`, `chat_chunks` và Vectorize index để AI Chatbot `Tư vấn One` có tri thức trả lời người dùng.
+
+### ADR-05: Hệ thống Nhận diện Logo Thương hiệu One - Store (One)
+- **Ý tưởng thiết kế:**
+  - Biểu tượng hội tụ số **"1"** cách điệu vươn mình thể hiện sự dẫn đầu và tính duy nhất ("One"), kết hợp cùng đường cong động học mô phỏng đế giày thể thao / cánh gió gia tốc (aerodynamic wave & rocker sole).
+  - Tích hợp nét vát màu đỏ năng động (#e11d48) trên nền than chì trầm (#0a0a0a).
+- **Tài nguyên phát triển:**
+  - Component React: `frontend/src/components/Logo.tsx` hỗ trợ 3 biến thể (`full`, `icon`, `stacked`) và 4 kích thước (`sm`, `md`, `lg`, `xl`), tối ưu hiển thị responsive.
+  - Tệp đồ họa Vector chuẩn: `frontend/public/logo.svg`, `frontend/public/logo-icon.svg`, `frontend/public/favicon.svg`.
+  - Đồng bộ trên toàn bộ UI: Header navbar, Footer, Admin Dashboard, Chatbot Tư vấn One và metadata icon trong `layout.tsx`.
+
+### ADR-06: Quy trình Mua hàng 1 Bước (Frictionless Guest Checkout & Chọn Size Nhanh)
+- **Bối cảnh:** Nâng cấp trải nghiệm mua sắm sneaker trực tuyến, giảm tối đa rào cản đặt hàng, không bắt buộc đăng nhập tài khoản.
+- **Quyết định & Tính năng cốt lõi:**
+  1. **Chọn Size Nhanh & Mua Ngay trên Card (`ProductCard.tsx`)**: Cho phép bấm chọn trực tiếp size giày (39 - 44) ngay trên thẻ. Cặp nút: **"MUA NGAY"** (mở thẳng form thanh toán 1 bước) + **"+ Giỏ hàng"**.
+  2. **Thanh toán 1 bước tức thì trong Drawer (`CartDrawer.tsx`)**: 100% Guest Checkout (Không cần tài khoản/mật khẩu). Hỗ trợ COD và Chuyển khoản QR; tự động ghi nhớ thông tin khách qua `localStorage` (`one:guest-info:v1`).
+  3. **Thanh tiến trình Miễn phí vận chuyển (Freeship Bar)**: Mốc 499.000đ hiển thị % động và số tiền còn thiếu.
+  4. **Bảng quy đổi Size giày chuẩn Âu - Á (`SizeGuideModal.tsx`)**: Đối chiếu EUR, US, UK, CM kèm mẹo chọn size cho chân bè Á Đông vs chân thon Âu - Mỹ.
+  5. **Bộ lọc thương hiệu & Size giày chuyên sâu (`ProductSection.tsx`)**.
+  6. **Thanh Bottom Bar cố định trên Mobile (`StickyMobileBar.tsx`)**.
+
+### ADR-07: Xóa sạch Dữ liệu Thời trang Cũ & Mở rộng 12 Mẫu Sneaker Âu - Á
+- **Bối cảnh:** Loại bỏ toàn bộ từ khóa quần áo, váy, đầm cũ; chuyển 100% sang phân phối sneaker thể thao.
+- **Triển khai:**
+  - Chạy migration `0005_clean_apparel_and_expand_sneakers.sql`: Xóa sạch các bản ghi thời trang cũ trong bảng `products` và `order_items`.
+  - Nạp 12 mẫu sneaker kinh điển: Nike Dunk Low Panda, Nike Pegasus 40, Adidas Samba OG, Asics Gel-Nimbus 26, Asics Gel-Kayano 30, New Balance 550, Salomon XT-6, Li-Ning Feidian 3.0, Onitsuka Tiger Mexico 66, Mizuno Wave Rider 27, Puma Palermo, Anta KT8.
+  - Phân loại rõ rệt theo 4 phân khúc: `Running`, `Lifestyle`, `Outdoor`, `Basketball`.
+
+### ADR-08: Hệ thống Hằng số Chuỗi (strings.ts) & Việt Hóa Thuần Túy 100%
+- **Bối cảnh:** Tách rời toàn bộ text hiển thị khỏi JSX để dễ bảo trì và chuẩn bị cho đa ngôn ngữ (Việt - Anh). Khi chọn Tiếng Việt, giao diện phải thuần Việt 100%, không pha trộn từ mượn ngoại lai.
+- **Triển khai:**
+  - Tạo Single Source of Truth cho chuỗi văn bản tại [frontend/src/constants/strings.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/constants/strings.ts).
+  - Việt hóa hoàn toàn các thuật ngữ: `Running` -> `Chạy bộ`, `Lifestyle` -> `Thời trang`, `Outdoor` -> `Dã ngoại`, `Basketball` -> `Bóng rổ`, `Freeship` -> `Miễn phí giao hàng`, `Voucher` -> `Mã giảm giá`, `Size` -> `Cỡ giày`.
+  - Type-safe dictionary qua `Dictionary` interface, đảm bảo song ngữ đồng bộ.
+
+### ADR-09: Quy chuẩn Zero-Emoji & Chuẩn hóa 100% Icon bằng `lucide-react`
+- **Bối cảnh:** Loại bỏ triệt để các emoji và ký tự unicode nhúng trực tiếp trong text, log, comment hoặc JSX (ví dụ: `👟`, `🛡️`, `📦`, `★`, `✓`).
+- **Triển khai:**
+  - 100% biểu tượng trực quan được thay thế bằng các component icon SVG chuẩn từ thư viện `lucide-react` (`ShieldCheck`, `Ruler`, `PackageCheck`, `Search`, `ShoppingBag`, `ArrowUpRight`, `RotateCcw`, `Check`, `Flame`, v.v.).
+  - Cung cấp đầy đủ thuộc tính trợ năng (`aria-hidden` hoặc `aria-label`).
+
+### ADR-10: Khắc phục Sự cố Backend & Tối ưu AI Gemma 4
+- **D1 Migrations:** Áp dụng đầy đủ các bản migration còn thiếu và tạo `0006_seed_vouchers.sql` nạp mã `ONE10` (-10%) và `ONE50` (-50k).
+- **Order Lookup:** Cập nhật regex chấp nhận tiền tố `ONE-`, `VL-`, `BK-` với độ dài 6-12 ký tự, cho phép tra cứu linh hoạt.
+- **Workers AI Gemma 4:** Nâng `max_tokens` lên 1200, xử lý cơ chế suy nghĩ (`reasoning_content`) để tránh lỗi content rỗng.
+
+### ADR-11: Bố cục Thẻ Nổi (Floating Cards) & Theme Tokens Thể Thao
+- **Theme Tokens (`frontend/src/constants/theme.ts`):** Tạo SSOT quản lý `COLORS`, `SHADOWS`, `RADII`, `FONTS`.
+- **Bảng màu thể thao năng động:**
+  - Trắng tinh khôi (`#ffffff`): Nền thẻ nổi, nền trang.
+  - Đỏ thể thao (`#e11d48`): Điểm nhấn CTA (Mua ngay, huy hiệu, tag giảm giá, icon active).
+  - Đen tuyền (`#0a0a0a`): Tiêu đề, nút bấm phụ, chân trang sang trọng.
+  - Xám trung tính (`#f8fafc`, `#f1f5f9`, `#e2e8f0`, `#64748b`): Nền studio sản phẩm, viền thẻ nổi mềm mại.
+- **Bố cục Thẻ Nổi (Floating Elevated Cards):** Mọi khối nội dung (`Hero`, `Perks`, `Filter Hub`, `Product Cards`, `Story Banner`, `Admin Panel`) đều là thẻ nổi nền trắng viền mảnh kèm hiệu ứng hover nâng thẻ nhẹ nhàng.
+
+### ADR-12: Tối ưu Tỷ lệ Hình học Chữ (Typography Ratio Enhancement)
+- **Bối cảnh:** Font tiêu đề cũ (`Syne`) có nét chữ bành ngang (extended), kết hợp `line-height: 1.08` quá thấp và `letter-spacing: -0.04em` quá hẹp khiến chữ tiếng Việt bị "phình ngang và ngắn dọc", dấu thanh bị co ép.
+- **Triển khai:**
+  - Chuyển đổi font tiêu đề sang **`Outfit`** (weights 500–900), đồng bộ với **`Plus Jakarta Sans`** cho thân bài.
+  - Cân bằng `line-height` cho tiêu đề ở mức **`1.22 – 1.25`** và tên sản phẩm ở mức **`1.42`**.
+  - Nới lỏng `letter-spacing` về **`-0.01em`** (hoặc `0`), nhãn uppercase về `0.06em – 0.08em`.
+  - Kết quả: Dáng chữ đứng thanh thoát, khỏe khoắn, dấu tiếng Việt hiển thị tự nhiên và cân đối.
+
+### ADR-13: Cơ chế Hot-Reloading Asset Manifest cho Cloudflare Wrangler
+- **Bối cảnh:** Khi chạy `wrangler dev` nền, nếu Next.js build tạo ra các hash chunk tĩnh mới (`.css`, `.js`), Wrangler không tự reload manifest in-memory dẫn đến trả về `404 Not Found` trên các tệp tĩnh.
+- **Khắc phục:** Tích hợp lệnh cập nhật timestamp của [backend/src/index.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/backend/src/index.ts) vào cuối lệnh `npm run build:frontend` trong [package.json](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/package.json#L9). Khi build xong, Wrangler tự động làm mới manifest và phục vụ 100% static chunks với mã `200 OK`.
+
+### ADR-14: Thiết lập Bộ Quy chuẩn Lập trình & Clean Code Bắt buộc (`CODE_CONVENTIONS.md`)
+- **Tài liệu:** Tạo [CODE_CONVENTIONS.md](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/CODE_CONVENTIONS.md) tại thư mục gốc và liên kết trong [AGENTS.md](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/AGENTS.md#L6-L7).
+- **Phạm vi:** Định nghĩa 5 nguyên tắc cốt lõi (SSOT, Zero-Emoji, No Hardcoded Strings, Type Safety, Frictionless UX), tiêu chuẩn backend (Anti-SQL Injection qua parameterized queries, Zod validations, KV invalidation), tiêu chuẩn frontend (tokens, typography, floating cards) và checklist nghiệm thu trước khi bàn giao.
+
+### ADR-15: Phân tách Độc lập Trang Chủ (`/`) và Trang Sản Phẩm (`/products`)
+- **Bối cảnh:** Trang bán hàng trước đây tích hợp lẫn lộn tính năng của cả trang chủ (banner to Hero chiếm toàn màn hình) và trang sản phẩm (danh sách lọc sản phẩm) trên cùng một route `/`. Cần tách thành 2 trang chuyên biệt với mục đích rõ ràng.
+- **Quyết định & Triển khai:**
+  1. **Tạo Trang sản phẩm chuyên biệt (`/products`)**:
+     - **Loại bỏ banner to (`Hero.tsx`)**: Không dùng banner lớn chiếm chỗ ở trang này để người mua tập trung vào sản phẩm.
+     - **Đưa banner nhỏ (`StoryBanner.tsx`) lên đầu trang sản phẩm**: Đặt ngay dưới Header, tạo điểm nhấn thương hiệu tinh tế trước khi xem danh mục.
+     - Phía dưới banner nhỏ là khu vực mua sắm `ProductSection` (bộ lọc thương hiệu Âu - Á, lọc cỡ giày, tìm kiếm, lưới sản phẩm). Đã loại bỏ 4 thẻ cam kết Perks theo yêu cầu người dùng.
+     - Phía cuối trang sản phẩm hoàn toàn không còn banner nhỏ bị lặp lại.
+  2. **Trang chủ (`/`)**:
+     - Đóng vai trò Landing Page chào sân với Hero Banner to (`Hero.tsx`) và thanh cam kết (`Perks.tsx`). Nút CTA *"KHÁM PHÁ BỘ SƯU TẬP GIÀY"* dẫn thẳng sang trang sản phẩm `/products`. Sẵn sàng cho giai đoạn phân tích thiết kế chi tiết ở bước sau.
+  3. **Hệ thống Providers Toàn cục (`Providers.tsx`)**:
+     - Bọc `ShopProvider`, các modals (Cart, Detail, Tracking, Wishlist, SizeGuide, Chatbot, Toast) và `AdminDashboard` tại `RootLayout` (`layout.tsx`), giúp lưu giữ trạng thái giỏ hàng, thông tin khách hàng và phiên đăng nhập xuyên suốt khi chuyển trang.
+  4. **Đồng bộ Header Navigation**:
+     - Bổ sung liên kết `TRANG CHỦ` (`/`) và `SẢN PHẨM` (`/products`).
+     - Tự động nhận diện pathname và hỗ trợ chọn danh mục (`CHẠY BỘ`, `THỜI TRANG`, `DÃ NGOẠI`) thông qua URL query parameter `?category=...`.
+  5. **Cấu hình Cloudflare Assets**:
+     - Thêm `trailingSlash: true` trong `next.config.ts` và `not_found_handling = "single-page-application"` trong `wrangler.toml` để đảm bảo định tuyến trực tiếp (`/products`, `/products/`) trả về mã HTTP `200 OK`.
+
+### ADR-16: Xử lý Tương thích RSC Flight Data (`__PAGE__.txt`) cho Cloudflare Workers Assets
+- **Bối cảnh:** Khi chạy Next.js 16 App Router Static Export, router phía client tải trước dữ liệu trang qua request dạng `GET /products/__next.products.__PAGE__.txt`. Tuy nhiên, cấu trúc thư mục tĩnh của Next.js lại sinh ra `out/products/__next.products/__PAGE__.txt` (thư mục lồng). Do không tìm thấy file có tên chứa dấu chấm `.` trên đĩa, Cloudflare Workers Assets với cấu hình SPA fallback đã trả về file `index.html`. Trình duyệt nhận HTML thay vì RSC text payload dẫn đến lỗi parse / crash navigation.
+- **Khắc phục triệt để:**
+  1. Tạo script tự động hóa [scripts/sync-rsc.js](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/scripts/sync-rsc.js).
+  2. Tích hợp trực tiếp vào script `build:frontend` trong [package.json](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/package.json): Sau mỗi lần `next build`, script tự động sao chép các tệp `__PAGE__.txt` từ thư mục con ra tệp có tên dấu chấm (`__next.<route>.__PAGE__.txt`) tại thư mục cha.
+  3. Kết quả: Tất cả các request RSC payload (`/__next.__PAGE__.txt`, `/products/__next.products.__PAGE__.txt`) được phục vụ trực tiếp với mã `200 OK` và đúng kiểu dữ liệu RSC text.
+
+### ADR-17: Chuẩn hóa Toàn bộ Navigation Menu thành thẻ Link & Kiểm soát Prefetch
+- **Bối cảnh:** 
+  1. Các mục danh mục trên menu Header (`CHẠY BỘ`, `THỜI TRANG`, `DÃ NGOẠI`) trước đó sử dụng thẻ `<button>` mà chưa được reset User-Agent styles, khiến trình duyệt hiển thị các hộp viền xám đen thô kệch, không đồng nhất với các liên kết khác.
+  2. Next.js App Router mặc định tự động gửi request prefetch ngầm (`HEAD /products/`, `GET /products/__next.products.__PAGE__.txt`) mỗi khi con trỏ chuột lướt qua Header, gây ra hàng loạt log không cần thiết trên terminal Wrangler.
+- **Khắc phục triệt để:**
+  1. Chuyển đổi 100% các mục điều hướng trong [Header.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/Header.tsx) sang thẻ `<Link>` của Next.js (sinh ra thẻ `<a>` chuẩn mực), loại bỏ hoàn toàn viền hộp xám, đồng nhất kiểu chữ, padding và hiệu ứng hover đỏ thể thao.
+  2. Bổ sung CSS reset cho `.navlinks button` trong [globals.css](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/globals.css).
+  3. Thêm cờ `prefetch={false}` cho các liên kết menu: Ngăn chặn triệt để việc Next.js spam log request RSC payload ngầm vào terminal; hệ thống chỉ tải dữ liệu khi người dùng thực sự click.
+  4. Hỗ trợ active highlight theo danh mục đang chọn (`selectedCategory`).
+
+### ADR-18: Tự Động Lướt Xuống Khung Hình Bộ Lọc Khi Chuyển Mục & Chuẩn Hóa Ảnh Sneaker Fallback
+- **Bối cảnh:** 
+  1. Cần phân tách rõ ràng hành vi tương tác giữa nút SẢN PHẨM (muốn xem toàn diện từ đầu trang sản phẩm) và các nút danh mục chuyên sâu (CHẠY BỘ, THỜI TRANG, DÃ NGOẠI - muốn xem ngay danh sách sản phẩm đã lọc).
+  2. Mảng `fallbackImages` trong `frontend/src/lib/api.ts` còn sót 6 ảnh thời trang (áo sơ mi, áo khoác, quần jean) từ phiên bản cũ khi API chưa có ảnh R2.
+- **Khắc phục:**
+  1. **Tự động cuộn mượt (Smooth Scroll) chính xác & Phân tầng trải nghiệm**:
+     - Thêm `scroll-margin-top: 90px;` trong `globals.css` cho `#products` và `.section` để khi cuộn đến, đỉnh khung hình luôn nằm ngay dưới thanh Header dính.
+     - **Nút SẢN PHẨM**: Chuyển hướng sang `/products` và luôn tự động cuộn lên **đỉnh đầu trang** (`top: 0`), cho phép người xem nhìn thấy banner nhỏ tinh gọn trước khi khám phá danh mục.
+     - **Các nút CHẠY BỘ, THỜI TRANG, DÃ NGOẠI**: Tự động chuyển hướng sang `/products?category=...#products`, kích hoạt bộ lọc tương ứng và **tự động lướt mượt mà xuống ngay khung hình bộ lọc & danh sách sản phẩm**.
+     - Trong [ProductSection.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/ProductSection.tsx), `useEffect` tự động kích hoạt `scrollIntoView({ behavior: 'smooth' })` khi có param `category` hoặc hash `#products`.
+  2. **Thay thế 100% Ảnh Fallback sang Sneaker Thể Thao**:
+     - Cập nhật [frontend/src/lib/api.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/lib/api.ts) với 6 ảnh giày thể thao sneaker chính hãng độ phân giải cao từ Unsplash (Nike, Adidas, Puma...). Loại bỏ hoàn toàn hình ảnh quần áo cũ.
+
+### ADR-19: Cập Nhật Chính Sách Miễn Phí Vận Chuyển Trong Nước Khi Mua Từ 3 Sản Phẩm
+- **Bối cảnh:** 
+  1. Yêu cầu nghiệp vụ mới: Cập nhật chính sách giao hàng của One - Store từ mốc giá trị (`subtotal >= 499.000₫`) sang số lượng sản phẩm: **Miễn phí vận chuyển trong nước cho khách hàng khi mua nhiều hơn 2 sản phẩm (tức từ 3 đôi giày trở lên trong giỏ hàng)**.
+  2. Đơn hàng dưới 3 sản phẩm chịu mức phí giao hàng tiêu chuẩn toàn quốc là `30.000₫`.
+- **Triển khai chi tiết:**
+  1. **Logic tính toán giỏ hàng & thanh toán ([CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx))**:
+     - Định nghĩa `const FREESHIP_MIN_ITEMS = 3;`.
+     - Tính tổng số lượng sản phẩm: `totalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0)`.
+     - Phí ship: `shippingFee = totalQuantity >= FREESHIP_MIN_ITEMS || cart.length === 0 ? 0 : 30000;`.
+     - Tiến trình Freeship bar: `progressPercent = Math.min(100, Math.round((totalQuantity / FREESHIP_MIN_ITEMS) * 100));`.
+     - Số sản phẩm còn thiếu: `remainingForFreeship = Math.max(0, FREESHIP_MIN_ITEMS - totalQuantity);`.
+     - Hiển thị văn bản tiến trình động: Khi `< 3` hiển thị `Mua thêm {remainingForFreeship} đôi giày nữa để được Miễn phí vận chuyển trong nước`, khi `>= 3` hiển thị `Đơn hàng từ 3 sản phẩm được MIỄN PHÍ VẬN CHUYỂN TRONG NƯỚC!`.
+  2. **Đồng bộ hóa 100% Từ điển Đa ngôn ngữ (i18n)**:
+     - `frontend/src/locales/vi/checkout.ts` & `frontend/src/locales/en/checkout.ts`: Cập nhật `freeship_qualified`, `freeship_remaining_prefix`, `freeship_remaining_suffix`.
+     - `frontend/src/locales/vi/product.ts` & `frontend/src/locales/en/product.ts`: Cập nhật `guarantee_freeship` ("Miễn phí vận chuyển trong nước: Khi mua từ 3 sản phẩm" / "Free Domestic Shipping: On orders of 3+ items").
+     - `frontend/src/locales/vi/common.ts` & `frontend/src/locales/en/common.ts`: Cập nhật cam kết freeship dịch vụ.
+  3. **Đồng bộ Hồ sơ & Tri thức Store ([STORE_PROFILE.md](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/STORE_PROFILE.md))**:
+     - Cập nhật mục 4 (Chính sách bán hàng & Dịch vụ khách hàng): Miễn phí vận chuyển trong nước khi mua từ 3 sản phẩm/đôi giày, phí vận chuyển tiêu chuẩn cho đơn dưới 3 sản phẩm là 30.000₫.
+
+### ADR-20: Cào Dữ Liệu 70 Mẫu Sneaker Chuẩn Giá Thị Trường 10 Thương Hiệu, Tải Ảnh Vào Cloudflare R2 & Vector Hóa Tri Thức AI
+- **Bối cảnh:**
+  1. Yêu cầu nghiệp vụ: Đồng bộ danh mục sản phẩm của One - Store với giá bán thực tế thị trường Việt Nam năm 2026, cung cấp hình ảnh chất lượng cao và xây dựng bộ nhớ tri thức toàn diện cho AI Chatbot.
+  2. Quy mô: 70 sản phẩm tiêu biểu (7 sản phẩm mỗi hãng) của 10 thương hiệu hợp tác (Nike, Adidas, New Balance, Puma, Salomon, Asics, Onitsuka Tiger, Mizuno, Li-Ning, Anta).
+  3. Yêu cầu kỹ thuật: Tải ảnh trực tiếp vào Cloudflare R2 Bucket nội bộ của shop (`nhom2-ba-khi-images`) thay vì dùng link ngoài, nạp CSDL D1 và vector hóa tri thức vào Cloudflare Vectorize.
+- **Triển khai chi tiết:**
+  1. **Script tự động hóa ([scripts/crawl-and-sync-sneakers.mjs](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/scripts/crawl-and-sync-sneakers.mjs))**:
+     - Định nghĩa bộ dữ liệu 70 mẫu sneaker chính hãng với đầy đủ thông số kỹ thuật (bọt đệm, đĩa carbon/wave, độ ôm chân, loại bàn chân, cự ly) và giá thị trường VNĐ (từ 1.890.000₫ đến 6.290.000₫).
+     - Tải 70 hình ảnh sneaker chất lượng cao và tải trực tiếp vào Cloudflare R2 qua API `/api/admin/images`, nhận `image_key` dạng `products/<uuid>.jpg`.
+     - Sinh file migration [backend/migrations/0007_seed_authentic_market_sneakers.sql](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/backend/migrations/0007_seed_authentic_market_sneakers.sql) và nạp nguyên tử vào CSDL D1 `fashion_db`.
+  2. **Hoàn thiện Bộ Lọc Thương hiệu Frontend ([ProductSection.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/ProductSection.tsx))**:
+     - Bổ sung `Onitsuka Tiger` vào mảng `brands` filter, đảm bảo toàn bộ 10 thương hiệu đều có thể lọc riêng biệt.
+  3. **Xây dựng Tri thức RAG Chuyên sâu & Vectorize Index**:
+     - Xóa tài liệu cũ legacy mang tên cũ `One-Fashion`.
+     - Tạo 3 tài liệu tri thức chuẩn mực và nạp vào Cloudflare Workers AI model `@cf/baai/bge-m3` để sinh vector embeddings nạp vào Cloudflare Vectorize `ba-khi-knowledge`:
+       * *Tài liệu 1*: "Danh mục 70 mẫu Sneaker Chính hãng và Bảng giá Thị trường One - Store 2026" (10 chunks).
+       * *Tài liệu 2*: "Cẩm nang Tư vấn Chọn Giày theo Phom Bàn chân và Công nghệ Đệm Âu Á" (2 chunks).
+       * *Tài liệu 3*: "Chính sách Miễn phí Vận chuyển từ 3 đôi và Đồng kiểm One - Store" (2 chunks).
+  4. **Kiểm thử nghiệm thu Chatbot RAG**:
+     - AI Chatbot *Tư vấn One* trả lời chính xác các câu hỏi tư vấn về phom chân bè Á Đông (đề xuất Asics, Mizuno, Li-Ning, Anta; khuyên tăng 0.5-1 size với Nike, Salomon) và chính xác chính sách freeship từ 3 đôi giày, trích xuất chính xác nguồn tài liệu tham khảo.
+
+### ADR-21: Khắc Phục Triệt Để Lỗi 500 Khi Client Request Chunk Chuyển Tiếp Giữa Các Bản Build Next.js
+- **Bối cảnh:**
+  1. Khi ứng dụng Next.js được build lại tĩnh (`next build`), Turbopack làm trống thư mục xuất và tạo các tên chunk hash mới (ví dụ: `0cz1d0mv5g_q7.js` thay thế `3l4gd1-4kyaqb.js`).
+  2. Các trình duyệt hoặc tab của người dùng đang mở trước đó vẫn giữ HTML của bản build cũ và tiếp tục gửi request tải chunk cũ (như `/_next/static/chunks/3l4gd1-4kyaqb.js`).
+  3. Wrangler Miniflare (đang chạy local nền) lưu bảng asset manifest trong bộ nhớ RAM từ đầu phiên. Khi file chunk cũ bị xóa khỏi ổ đĩa, Miniflare cố đọc file, gặp lỗi `ENOENT` và trả về mã lỗi `500 Internal Server Error` thay vì xử lý mượt mà.
+- **Khắc phục triệt để:**
+  1. **Cơ chế Bảo Toàn Chunks Lũy Tích ([scripts/sync-rsc.js](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/scripts/sync-rsc.js))**:
+     - Thiết lập thư mục lưu trữ chunk lũy tích `frontend/.chunk-cache/` (đã thêm vào [.gitignore](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/.gitignore)).
+     - Sau mỗi lần Next.js build, script `sync-rsc.js` tự động khôi phục các chunk cũ từ cache vào `frontend/out/_next/static/chunks/` nếu trên đĩa chưa có, đồng thời cập nhật các chunk mới vào cache.
+     - Nhờ đó, cả client đang mở bản build cũ lẫn client mở bản build mới đều tìm thấy file chunk tương ứng, Miniflare không bị lỗi `ENOENT` và không bao giờ xuất hiện lỗi `500 Internal Server Error`.
+  2. **Kết quả kiểm thử**:
+     - Request `GET /_next/static/chunks/3l4gd1-4kyaqb.js` trả về HTTP `200 OK`.
+     - Request trang chủ `/`, trang `/products/` và API `/api/products` đều phản hồi `200 OK` ổn định.
+
+### ADR-22: Chuẩn Hóa 100% Ảnh Sneaker Studio Chính Hãng, Khắc Phục Triệt Để Lỗi Ảnh Sai Mẫu & Lệch Thương Hiệu
+- **Bối cảnh:**
+  1. Người dùng phát hiện một số sản phẩm hiển thị sai hình ảnh:
+     - `Li-Ning Way of Wade 10 Mint Blossom` hiển thị ảnh áo thun trắng treo tường.
+     - `Li-Ning Super Light 21 Breeze` hiển thị ảnh người mẫu đứng trước tranh vẽ graffiti.
+     - `Li-Ning Yueying 3 Pro Dual BOOM` hiển thị ảnh balo đen.
+     - Các mẫu giày Adidas (Samba OG, Ultraboost, Adizero Adios Pro 3) và Anta (C202 GT Pro) bị gán ảnh giày Nike (có dấu Swoosh).
+  2. Nguyên nhân gốc: Khi seed dữ liệu trước đó, script dùng kho ảnh nghệ thuật đại trà Unsplash theo photo ID tĩnh. Do Unsplash không phải catalog sản phẩm chuyên biệt, một số photo ID là quần áo/phụ kiện hoặc ảnh giày Nike chụp tự do.
+- **Khắc phục toàn diện:**
+  1. **Xây dựng Script Thu Thập & Xác Thực Ảnh Chuyên Biệt ([scripts/sync-authentic-sneaker-images.mjs](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/scripts/sync-authentic-sneaker-images.mjs))**:
+     - Danh sách từ khóa cấm (Blacklist): loại bỏ triệt để các kết quả chứa áo (t-shirt, shirt, tee), quần (pant), balo (backpack, bag), áo khoác (jacket, hoodie), người mẫu (person, model).
+     - Ràng buộc thương hiệu nghiêm ngặt: Tên thương hiệu trong tiêu đề/URL phải khớp với hãng của sản phẩm, không cho phép ảnh chứa thương hiệu khác.
+     - Trích xuất ảnh góc ngang studio (lateral profile/hero shot) từ các nguồn CDN chính hãng và sàn uy tín: `assets.adidas.com`, `static.nike.com`, `images.puma.com`, `images.stockx.com`, `shopnings.com`, `lining-goods-online`, `anta.com`, `cdna.lystit.com`.
+     - Kiểm tra kích thước (>10KB), mime type và magic bytes (JPEG/PNG/WebP).
+  2. **Đồng bộ vào Cloudflare R2 & CSDL D1**:
+     - Upload trực tiếp toàn bộ 70 ảnh đạt chuẩn vào R2 Bucket (`nhom2-ba-khi-images`) qua `POST /api/admin/images`.
+     - Xuất và thực thi file migration [backend/migrations/0008_update_authentic_sneaker_images.sql](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/backend/migrations/0008_update_authentic_sneaker_images.sql) cập nhật 70 câu lệnh `UPDATE products SET image_key = ... WHERE id = ...`.
+     - Tỷ lệ thành công: 70/70 sản phẩm (100%).
+  3. **Biên dịch & Kiểm thử nghiệm thu**:
+     - Chạy `npm run build:frontend` cập nhật toàn bộ static export và bảo toàn chunk cache.
+     - Kiểm tra trực tiếp API `/api/products` và endpoint ảnh `/api/images/...`: 100% sản phẩm trả về HTTP `200 OK`, `image/jpeg` hoặc `image/webp`.
+
+### ADR-23: Mô Hình Mua Sắm Không Cần Đăng Nhập (Guest-First E-Commerce), Banner Cookie Vĩnh Viễn & Giỏ Hàng Lưu Cookie Tự Động Xóa Khi Chưa Đồng Ý
+- **Bối cảnh:**
+  1. Người dùng yêu cầu loại bỏ rào cản đăng nhập tài khoản nhằm tối ưu hóa trải nghiệm khách hàng (Zero Friction UX), người mua không cần tạo tài khoản hay ghi nhớ mật khẩu.
+  2. Hiển thị banner chấp thuận sử dụng Cookie khi lần đầu truy cập, lưu trữ cookie vĩnh viễn không thời hạn (`Max-Age=315360000` ~ 10 năm).
+  3. Yêu cầu chi tiết về Giỏ hàng & Yêu thích:
+     - Khi khách hàng **CHƯA chấp nhận lưu cookie**: Vẫn cho phép thêm vào giỏ hàng và đặt hàng bình thường trong phiên hiện tại, nhưng khi tải lại trang (`F5`) thì giỏ hàng và danh mục yêu thích **tự động biến mất** (reset về rỗng), không lưu vết trên trình duyệt.
+     - Khi khách hàng **BẤM CHẤP NHẬN lưu cookie**: Giỏ hàng và danh mục yêu thích được lưu trực tiếp vào Cookie trình duyệt (`one_cart`, `one_wishlist`) với thời hạn không thời hạn (10 năm), những lần sau khi truy cập lại web các thông tin này sẽ được tự động lấy ra đầy đủ.
+- **Triển khai chi tiết:**
+  1. **Component Cookie Consent ([CookieConsentBanner.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CookieConsentBanner.tsx))**:
+     - Thiết kế dạng Floating Banner bo tròn góc dưới màn hình, hiệu ứng kính mờ (Glassmorphism), viền mảnh và đổ bóng sang trọng, không che lấp nội dung chính của trang web.
+     - Tích hợp hàm `acceptCookieConsent()` từ `useShop()`: Khi người dùng bấm "Đồng ý & Tiếp tục", lập tức ghi cookie `one_cookie_consent=accepted; Max-Age=315360000; Path=/; SameSite=Lax` và lưu giỏ hàng `cart` hiện tại vào cookie `one_cart`, danh sách yêu thích vào `one_wishlist`.
+  2. **Cơ Chế Giỏ Hàng & Yêu Thích Lưu Cookie Thông Minh ([ShopContext.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/context/ShopContext.tsx))**:
+     - **Khi tải lại trang (`onMount`)**: Kiểm tra `checkIsCookieAccepted()`. Nếu chưa chấp nhận consent, dọn sạch cookie `one_cart`, `one_wishlist` và reset `cart = []`, `wishlistIds = []`. Nếu đã chấp nhận, giải mã JSON từ cookie `one_cart` và `one_wishlist` để khôi phục trạng thái giỏ hàng & yêu thích.
+     - **Khi thay đổi giỏ hàng (`useEffect`)**: Chỉ ghi vào cookie `one_cart` và localStorage khi `cookieConsent || checkIsCookieAccepted()` là true. Nếu chưa chấp nhận, dữ liệu chỉ tồn tại trong React state bộ nhớ tạm của phiên.
+     - **Khi thao tác yêu thích (`toggleWishlist`)**: Tương tự, chỉ ghi vào cookie `one_wishlist` khi đã được chấp thuận cookie.
+  3. **Tái Định Vị Nút Điều Hướng Header ([Header.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/Header.tsx))**:
+     - Thay thế icon User đăng nhập cũ bằng nút **"Đơn hàng của tôi"** (`Package` icon), mở trực tiếp modal tra cứu đơn hàng (`TrackingModal`).
+  4. **Tra Cứu Nhanh Đơn Hàng Trên Thiết Bị ([CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx) & [TrackingModal.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/TrackingModal.tsx))**:
+     - Khi đặt hàng thành công, tự động lưu mã đơn (`ONE-...`) vào danh sách `one:recent_orders` trên thiết bị.
+     - Trong `TrackingModal`, hiển thị các chip đơn hàng gần đây trên thiết bị để khách hàng bấm kiểm tra trạng thái vận chuyển tức thì chỉ với 1 cú nhấp chuột.
+  5. **Dọn Dẹp Codebase ([Providers.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/Providers.tsx))**:
+     - Xóa bỏ `MemberModal.tsx` và loại bỏ `'member'` khỏi `activeModal` type union, loại bỏ mã nguồn thừa.
+  6. **Trải Nghiệm Thêm Vào Giỏ Hàng Mượt Mà ([ShopContext.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/context/ShopContext.tsx) & [ProductCard.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/ProductCard.tsx))**:
+     - Cấu hình `openDrawer: boolean = false` mặc định trong `addToCart`: Khi khách hàng click nút "+ Giỏ hàng" hoặc chọn thêm vào giỏ, hệ thống chỉ thêm sản phẩm, cập nhật số lượng badge và hiện Toast thông báo xác nhận thành công, **không tự động mở drawer / modal giỏ hàng** để tránh làm gián đoạn trải nghiệm lướt xem hàng. Drawer chỉ mở khi khách hàng bấm trực tiếp vào biểu tượng giỏ hàng trên Header hoặc bấm nút "MUA NGAY".
+
+### ADR-24: Tùy Biến Banner To Trang Chủ Sang Phối Màu Đen & Đỏ (Bred Aesthetic) & Tối Ưu Độ Tương Phản Chữ Nổi Bật
+- **Bối cảnh:**
+  1. Người dùng yêu cầu đổi màu banner to ở trang chủ (Hero Banner) thành sự kết hợp giữa **Màu Đen** và **Màu Đỏ**.
+  2. Toàn bộ chữ trong banner phải được đổi màu sao cho hiển thị cực kỳ nổi bật, sắc nét và dễ đọc trên nền tối.
+- **Triển khai chi tiết:**
+  1. **Khung Banner Hero ([globals.css](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/globals.css))**:
+     - Nền: `radial-gradient(circle at 85% 20%, rgba(225, 29, 72, 0.22) 0%, rgba(10, 10, 14, 0.98) 60%), #0a0a0d;` (Đen than chì sâu thẳm điểm xuyết ánh sáng đỏ tỏa mờ sang trọng).
+     - Viền: `border: 1px solid rgba(225, 29, 72, 0.35);` kèm bóng đổ nổi 3D `box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.55), 0 0 40px rgba(225, 29, 72, 0.12);`.
+  2. **Tối Ưu Độ Tương Phản Chữ ([globals.css](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/globals.css) & [Hero.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/Hero.tsx))**:
+     - Tiêu đề chính `h1`: Dòng 1 đổi sang màu Trắng tinh khôi `#ffffff`; dòng 2 (`.hero-red-highlight`) đổi sang màu Đỏ rực `#ff3355` có hiệu ứng phát sáng nhẹ `text-shadow: 0 0 25px rgba(255, 51, 85, 0.35)`.
+     - Phụ đề đoạn văn `p`: Đổi sang màu xám trắng bạc sáng `#e4e4e7`, đảm bảo tỷ lệ tương phản cao (WCAG AAA), đọc rất êm mắt.
+     - Nhãn `eyebrow`: Nền đen đỏ mờ `rgba(225, 29, 72, 0.12)`, viền đỏ `rgba(225, 29, 72, 0.45)`, chữ đỏ tươi `#ff4d6d`.
+     - Nút phụ `.secondary-btn`: Đổi sang nền đen trong suốt `rgba(255, 255, 255, 0.05)`, viền đỏ mảnh `rgba(225, 29, 72, 0.4)`, chữ trắng `#ffffff` và icon đỏ `#ff4d6d`.
+  3. **Khu Vực Ảnh Sneaker Studio ([globals.css](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/globals.css))**:
+     - Khung ảnh `.hero-photo-wrap`: Nền tối gradient chuyển màu, viền phân cách đỏ mờ `border-left: 1px solid rgba(225, 29, 72, 0.2);`.
+     - Ảnh `.hero-photo`: Viền đỏ mảnh `1px solid rgba(225, 29, 72, 0.35)` và bóng đổ sâu `box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.7), 0 0 25px rgba(225, 29, 72, 0.2);`.
+     - Badge nổi `.hero-badge-floating`: Kính mờ đen tối viền đỏ `#ff4d6d`, chữ trắng nổi bật.
+
+### ADR-25: Tích Hợp Mô Hình 3D WebGL Nike Air Jordan 1 Vào Banner To Trang Chủ Bằng Three.js, Chuẩn Hóa Đường Dẫn Tương Đối & Tối Ưu Asset
+- **Bối cảnh:**
+  1. Người dùng yêu cầu thay ảnh tĩnh ở Banner to (Hero Banner) bằng mô hình 3D thực tế của file `D:\nike_air_jordan_1.glb`.
+| `frontend/src/locales/vi/product.ts` & `en/product.ts` | Modified | Bổ sung `colors_map` (115 màu chuẩn quốc tế) và `descriptions_map` (70 mẫu giày sneaker). |
+| `frontend/src/locales/vi/checkout.ts` & `en/checkout.ts` | Modified | Loại bỏ hoàn toàn `(no account needed)` và `1-Step`, chuẩn hóa `Checkout`, `Fast Checkout`, `PROCEED TO CHECKOUT`. |
+| `frontend/src/locales/vi/common.ts` & `en/common.ts` | Modified | Bổ sung `declined_bar_prefix`, `declined_bar_action`, `viewer_3d` chuẩn song ngữ 1-1. |
+| `frontend/src/locales/vi/modals.ts` & `en/modals.ts` | Modified | Bổ sung các trường tra cứu đơn hàng (`all_orders_tip`, `orders_suffix`, `recipient_phone_label`, `inspection_policy`, `lookup_all_title`, `not_found_desc`). |
+| `frontend/src/components/CookieConsentBanner.tsx` | Modified | Loại bỏ nút 'x' ở header, giữ nút 'Đóng', tích hợp trạng thái từ chối cookie `isCookieDeclined`. |
+| `frontend/src/components/Header.tsx` | Modified | Mặc định hiển thị thanh thông báo cookie màu trắng chữ đen in hoa dưới Topbar cho đến khi khách đồng ý. |
+| `frontend/src/app/orders/page.tsx` | Modified | Dịch song ngữ 100% (SĐT, số đơn hàng, chính sách đồng kiểm, tag `[Method: COD]`, ngày giờ theo locale, breadcrumb `HOME > PURCHASE HISTORY`). |
+| `frontend/src/components/ProductDetailModal.tsx` | Modified | Tra cứu song ngữ mô tả qua `descriptions_map` và màu sắc qua `colors_map`. |
+| `frontend/src/components/ProductCard.tsx` | Modified | Tra cứu song ngữ màu sắc qua `colors_map` cho cả tiêu đề và chip chọn màu. |
+| `frontend/src/components/CartDrawer.tsx` | Modified | Tra cứu song ngữ màu sắc qua `colors_map`, tự động đồng bộ tag `[Method: COD]` khi đặt hàng tiếng Anh. |
+  2. Yêu cầu bắt buộc: **Không sử dụng đường dẫn tuyệt đối**, mô hình phải được import/tải qua đường dẫn tương đối nội bộ của dự án.
+  3. Cho phép tương tác kéo chuột xoay 360 độ, cuộn chuột phóng to/thu nhỏ xem toàn cảnh chi tiết của giày.
+- **Triển khai chi tiết:**
+  1. **Chuẩn Hóa Đường Dẫn Tương Đối**:
+     - Sao chép file từ `D:\nike_air_jordan_1.glb` vào thư mục tài nguyên tĩnh `frontend/public/models/nike_air_jordan_1.glb`.
+     - Đường dẫn gọi trên web là đường dẫn tương đối `/models/nike_air_jordan_1.glb`.
+  2. **Giải Quyết Giới Hạn 25MB Cloudflare Workers Assets Bằng Tối Ưu WebP**:
+     - Tệp gốc 70.92 MB vượt quá trần 25 MiB của Cloudflare Workers Assets.
+     - Sử dụng `@gltf-transform/cli webp` tối ưu hóa 24 kết cấu ảnh PNG 2K bên trong sang chuẩn nén WebP chất lượng cao (quality 85%).
+     - Dung lượng giảm từ **70.92 MB** xuống còn **18.3 MB** (~19.18 MB < 25 MB) mà vẫn giữ nguyên 100% độ sắc nét của hình học và vân da sneaker.
+  3. **Trình Render 3D WebGL Cao Cấp ([Sneaker3DViewer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/Sneaker3DViewer.tsx))**:
+     - Xây dựng bằng `three` (`^0.187.0`), `GLTFLoader` và `OrbitControls`.
+     - Thiết lập hệ thống chiếu sáng Studio 5 điểm (Key Light, Fill Light, Rim Light, Ambient Light và 2 Point Light đỏ thể thao phản chiếu viền giày).
+     - Tự động căn giữa tâm hình học (`Box3`), tự động scale vừa vặn khung nhìn và áp dụng tone mapping ACESFilmic chuẩn điện ảnh.
+     - Điều khiển mượt mà: Xoay 360 độ, zoom cận cảnh, pan, tùy chọn bật/tắt tự động xoay (`autoRotate`) và nút khôi phục góc nhìn mặc định.
+     - Thanh tiến trình tải mượt mà (Loading Progress Bar) báo % chi tiết khi tải tệp.
+  4. **Nhúng Hoàn Thiện Vào Hero ([Hero.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/Hero.tsx))**:
+     - Thay thế thẻ ảnh tĩnh `.hero-photo` bằng `<Sneaker3DViewer modelUrl="/models/nike_air_jordan_1.glb" height={520} />`.
+     - Đồng bộ hoàn hảo với phong cách Black & Red của Banner to.
+  5. **Căn Giữa Trọng Tâm & Nâng Góc Nhìn Camera ([Sneaker3DViewer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/Sneaker3DViewer.tsx))**:
+     - Nâng góc camera mặc định từ `y = 1.4` lên `y = 2.2` (`camera.position.set(3.0, 2.2, 4.2)`), nhìn chếch 35 độ từ trên xuống (Studio Top-Down 3/4 View), quan sát rõ ràng cả mặt trên mũi giày, dây giày và mặt trước hộp giày.
+     - Hạ nhẹ offset `model.position.y = -center.y - (size.y * 0.08)` và điều chỉnh tỉ lệ `scale = 1.95 / maxDim` giúp đôi giày và hộp giày nằm cân đối 100% ở tâm khung hình, có khoảng thở padding đều cả 4 phía, loại bỏ hoàn toàn hiện tượng chạm mép trên.
+
+### ADR-26: Bổ Sung Khu Vực Top 4 Sản Phẩm Bán Chạy Nhất Dưới Thanh Đặc Quyền Trang Chủ (Minimalist Card - Chỉ Hình & Tên Giày)
+- **Bối cảnh:**
+  1. Người dùng yêu cầu hiển thị Top 4 sản phẩm bán chạy nhất đặt ngay bên dưới 4 banner đặc quyền dịch vụ (Perks) và phía trên chân trang Footer.
+  2. Yêu cầu thiết kế tối giản: **Chỉ hiển thị Hình ảnh và Tên giày**, hoàn toàn loại bỏ các nút hành động (như Mua ngay, Thêm vào giỏ, Chọn size...).
+- **Triển khai chi tiết:**
+  1. **Component Top Bán Chạy ([BestSellers.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/BestSellers.tsx))**:
+     - Lựa chọn 4 mẫu sneaker bán chạy kinh điển nhất mọi thời đại:
+       * `#1`: **Nike Dunk Low Retro Panda**
+       * `#2`: **Adidas Samba OG Classic**
+       * `#3`: **Asics Gel-Kayano 31 4D Guidance**
+       * `#4`: **New Balance 550 White Grey**
+     - Mỗi thẻ hiển thị:
+       * Huy hiệu xếp hạng tinh xảo: `TOP #1`, `TOP #2`, `TOP #3`, `TOP #4` kèm icon cúp `Trophy`.
+       * Khung ảnh studio vuông vức tỉ lệ 1:1, ảnh giày chất lượng cao với hiệu ứng hover zoom mượt mà (`1.06x`).
+       * Tên giày in đậm sắc nét với font `Outfit` / `Plus Jakarta Sans`, chuyển màu đỏ thể thao khi rê chuột.
+       * 100% không chứa nút Mua ngay hay nút bấm phức tạp. Khi nhấp vào thẻ, tự động mở `ProductDetailModal` để xem chi tiết lớn và các góc chụp của giày.
+  2. **Tích Hợp Vào Bố Cục Trang Chủ ([page.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/page.tsx))**:
+     - Đặt `<BestSellers />` ngay dưới `<Perks />`, cách chân trang một khoảng thở thoáng đãng `paddingBottom: '40px'`.
+
+---
+
+### ADR-27: Thêm Dòng Chọn Màu Sắc Dưới Dòng Chọn Cỡ Giày Trong Thẻ Danh Mục Sản Phẩm (ProductCard)
+- **Bối cảnh:**
+  1. Người dùng yêu cầu tại danh mục sản phẩm (Catalog Grid), mỗi thẻ sản phẩm cần có thêm dòng chọn màu sắc đặt ngay bên dưới dòng chọn cỡ giày.
+- **Triển khai chi tiết:**
+  1. **Từ điển Ngôn ngữ ([product.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/vi/product.ts) & [en/product.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/product.ts)):**
+     - Bổ sung trường `select_color: 'Chọn màu sắc:'` (tiếng Việt) và `select_color: 'Select Color:'` (tiếng Anh).
+  2. **Quản lý State & Tương tác ([ProductCard.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/ProductCard.tsx)):**
+     - Cập nhật state `[selectedColor, setSelectedColor] = useState<string>(availableColors[0])`.
+     - Thêm `useEffect` tự động đồng bộ lại `selectedSize` và `selectedColor` khi danh sách thuộc tính của sản phẩm thay đổi.
+     - Hàm helper `getColorDot(colorName)` tự động nhận diện sắc độ (Đen `#18181b`, Trắng `#ffffff`, Đỏ `#e11d48`, Cam `#f97316`, Vàng `#eab308`, Xanh lá `#16a34a`, Navy `#1e3a8a`, Xanh dương/Ngọc `#0284c7`, Bạc/Xám `#94a3b8`,...) để hiển thị chấm màu tròn 7px tinh tế trong từng nút pill.
+     - Hàng nút chọn màu sắc đặt ngay bên dưới hàng chọn cỡ giày, hiển thị nhãn: `Chọn màu sắc: <b style={{ color: COLORS.black.primary }}>{selectedColor}</b>`.
+     - Nút pill màu sắc có hiệu ứng active viền đen đậm, nền đen chữ trắng sắc nét khi được chọn.
+     - Tích hợp liền mạch: Khi bấm `MUA NGAY` hoặc nút thêm vào giỏ hàng trên thẻ, thuộc tính `selectedColor` đã chọn được truyền chuẩn xác vào đơn hàng và giỏ hàng.
+
+---
+
+### ADR-28: Tối Ưu Bố Cục Modal Bảng Quy Đổi Cỡ Giày Chuẩn Âu - Á (Căn Giữa, Tăng Khoảng Đệm & Thanh Cuộn Bên Trong Bo Góc)
+- **Bối cảnh:**
+  1. Người dùng phản hồi Modal Bảng Quy Đổi Cỡ Giày (`SizeGuideModal`) bị lệch mép trái, chữ và bảng quá sát viền gây khó đọc.
+  2. Thanh cuộn dọc bị tràn ra ngoài bo góc của modalbox, làm mất thẩm mỹ các góc bo tròn.
+- **Triển khai chi tiết ([SizeGuideModal.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/SizeGuideModal.tsx)):**
+  1. **Căn Giữa Hoàn Hảo**:
+     - Loại bỏ `maxWidth` cố định trên phần tử bao `.modal`.
+     - Áp dụng Flexbox container toàn màn hình: `position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px 16px;`.
+     - Thẻ modalbox `width: min(680px, 100%)` tự động căn giữa 100% cả chiều ngang và chiều dọc.
+  2. **Tăng Khoảng Cách Margin/Padding (Loại Bỏ Hiện Tượng Sát Viền)**:
+     - Thiết lập khoảng đệm thoáng đãng `padding: clamp(24px, 4vw, 36px)` cho vùng nội dung.
+     - Badge eyebrow, tiêu đề thước đo, bảng quy đổi 4 cột (EUR, US, UK, CM), hộp lời khuyên phom chân và hướng dẫn đo chân đều có khoảng đệm đều 4 phía, không bao giờ chạm sát viền.
+     - Bảng quy đổi cỡ giày được bo góc `14px` và có viền `1px solid #e4e4e7` riêng biệt sang trọng.
+  3. **Thanh Cuộn Dọc Nằm 100% Bên Trong Thẻ Bo Góc**:
+     - Thẻ ngoài `.modalbox` thiết lập `borderRadius: 24px` kết hợp `overflow: hidden` để chặn triệt để tình trạng thanh cuộn hoặc nội dung làm vuông góc bo tròn.
+     - Khối con bên trong `.size-guide-scroll-container` đảm nhiệm cuộn nội dung `overflowY: auto`.
+     - Tùy biến thanh cuộn mảnh thanh lịch: `width: 6px`, bo tròn tròn `borderRadius: 9999px`, màu `#cbd5e1`.
+     - Thêm khoảng thụt `margin: 16px 0` cho `::-webkit-scrollbar-track` giúp thanh cuộn cách đều hai góc bo tròn trên/dưới 16px, nằm trọn vẹn bên trong thẻ bo góc.
+
+---
+
+### ADR-29: Chuẩn Hóa Phương Thức Thanh Toán COD Thuần Túy & Tối Ưu Bố Cục Nút Chọn (CartDrawer)
+- **Bối cảnh:**
+  1. Người dùng yêu cầu loại bỏ phương thức thanh toán bằng chuyển khoản / thẻ ngân hàng tại modal thanh toán (CartDrawer), chỉ giữ lại duy nhất hình thức COD (Thanh toán tiền mặt khi nhận hàng & Đồng kiểm).
+  2. Bố cục cũ bị lỗi chia đôi: 1 nửa là nút tích chọn radio nằm lệch ở giữa, 1 nửa là text bị chèn ép sang bên phải do quy tắc CSS `.form input { width: 100% }`.
+- **Triển khai chi tiết ([CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx)):**
+  1. **Loại Bỏ Hoàn Toàn Tùy Chọn Chuyển Khoản Ngân Hàng**:
+     - Giữ duy nhất 1 thẻ thanh toán COD: *Thanh toán tiền mặt khi nhận hàng (Đồng kiểm)*.
+     - Mô tả: *Kiểm tra hàng đúng cỡ giày, đúng mẫu rồi mới trả tiền*.
+     - Mặc định toàn bộ đơn hàng được khởi tạo với hình thức COD.
+  2. **Thu Gọn Nút Chọn Radio & Mở Rộng Không Gian Text Toàn Chiều Ngang**:
+     - Cố định kích thước nút chọn radio: `width: 18px; height: 18px; minWidth: 18px; maxWidth: 18px; flexShrink: 0; margin: 0; padding: 0;`, ghi đè hoàn toàn quy tắc `width: 100%` của form.
+     - Nút radio được căn sát mép trái với màu đỏ thương hiệu `accentColor: COLORS.red.primary`.
+     - Khối text nhận `flex: 1; minWidth: 0;` chiếm trọn 100% không gian còn lại trên thẻ, cho phép tiêu đề và mô tả đồng kiểm trải dài thoáng đãng, sắc nét và dễ đọc.
+     - Thẻ thanh toán được bọc viền đỏ nhạt sang trọng (`border: 1.5px solid #e11d48`, `background: rgba(225, 29, 72, 0.04)`, `borderRadius: 10px`, `padding: 12px 14px`).
+
+---
+
+### ADR-30: Kiểm Soát Tuyệt Đối Dữ Liệu Thiết Bị Theo Trạng Thái Đồng Ý Cookie (Cookie Consent Gating)
+- **Bối cảnh:**
+  1. Người dùng yêu cầu: Nếu khách hàng chưa bấm chấp nhận Cookie, tuyệt đối **không lưu mã đơn hàng, lịch sử đơn hàng hay thông tin người mua** vào máy.
+  2. Chỉ khi khách hàng bấm **Chấp nhận Cookie**, tất cả chức năng liên quan đến lưu trữ lâu dài trên thiết bị (lịch sử đơn hàng `recent_orders`, thông tin người mua `guest_info`, giỏ hàng `cart`, sản phẩm yêu thích `wishlist`) mới được phép lưu vào Cookie và LocalStorage.
+- **Triển khai chi tiết ([ShopContext.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/context/ShopContext.tsx), [CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx), [TrackingModal.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/TrackingModal.tsx)):**
+  1. **Khi Chưa Chấp Nhận Cookie (`!cookieConsent`):**
+     - Khi vào trang / tải lại trang: Dọn dẹp triệt để mọi dữ liệu máy cũ (`one:recent_orders`, `GUEST_INFO_KEY`, `one_cart`, `one_wishlist`), đưa state về rỗng.
+     - Khi đặt hàng: Không lưu mã đơn vào `one:recent_orders`, không lưu thông tin người mua vào `localStorage`.
+     - Trong modal tra cứu đơn hàng (`TrackingModal`): Không hiển thị lịch sử đơn hàng cũ.
+  2. **Khi Khách Hàng Bấm "Chấp Nhận Cookie" (`acceptCookieConsent`):**
+     - Kích hoạt ghi nhận Cookie đồng thuận không thời hạn (`Max-Age=315360000; SameSite=Lax`).
+     - Lập tức sao lưu đồng bộ toàn bộ trạng thái hiện tại (giỏ hàng, danh sách yêu thích, thông tin người mua, danh sách mã đơn vừa đặt) vào Cookie và LocalStorage.
+     - Kể từ thời điểm đó, mọi thao tác mua sắm tiếp theo sẽ tự động được lưu trữ và khôi phục khi truy cập lại.
+
+---
+
+### ADR-31: Cảnh Báo In Đậm Đỏ & Nút Duyệt Cookie Tại Màn Hình Đặt Hàng Thành Công (Tối Ưu Không Hiện Lại Modal)
+- **Bối cảnh:**
+  1. Người dùng yêu cầu: Tại màn hình đặt hàng thành công (`Order Success View`), nếu khách hàng chưa thực hiện chấp nhận cookie thì hiển thị thông báo được **in đậm đỏ**:
+     *"Quý khách chưa đồng ý cho hệ thống sử dụng cookie, mọi thông tin như lịch sử mua hàng, giỏ hàng, sản phẩm ưa thích,... sẽ không được lưu lại và sẽ mất khi tải lại trang. Vui lòng lưu lại mã đơn hàng để tra cứu hoặc nhấn đồng ý và tiếp tục để hệ thống có thể sử dụng cookie trên trình duyệt của bạn."*
+  2. Ngay trong khối cảnh báo đỏ, tích hợp sẵn nút bấm **"Đồng ý & Tiếp tục sử dụng Cookie"**.
+  3. Do nút chấp thuận đã có sẵn trực tiếp trên màn hình đặt hàng thành công, người dùng yêu cầu **loại bỏ logic hiển thị lại modal/banner Trải Nghiệm Mua Sắm & Cookie** để tránh chồng chéo giao diện.
+  4. Nếu khách hàng đã chấp nhận cookie từ trước (`cookieConsent === true`) thì đặt hàng diễn ra bình thường (không hiện cảnh báo đỏ).
+- **Triển khai chi tiết ([ShopContext.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/context/ShopContext.tsx), [CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx), [CookieConsentBanner.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CookieConsentBanner.tsx), [checkout.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/vi/checkout.ts)):**
+  1. **Từ điển Ngôn ngữ (`checkout.ts` vi & en):**
+     - Bổ sung `cookie_warning` (văn bản tiếng Việt chuẩn dấu) và `cookie_accept_btn: 'Đồng ý & Tiếp tục sử dụng Cookie'`.
+     - Đồng bộ bản dịch tiếng Anh dự phòng trong `locales/en/checkout.ts`.
+  2. **Cảnh Báo Đặt Hàng & Nút Chấp Thuận Trực Tiếp (`CartDrawer.tsx`):**
+     - Tại `Order Success View`: nếu `!cookieConsent`, hiển thị khối cảnh báo nền hồng nhạt `#fff1f2`, viền đỏ `#e11d48`, icon `AlertTriangle`, văn bản in đậm đỏ (`fontWeight: 800`, `color: #be123c`).
+     - Tích hợp nút bấm *"Đồng ý & Tiếp tục sử dụng Cookie"* ngay trong khối cảnh báo: khi nhấp, gọi `acceptCookieConsent()`, lưu ngay mã đơn vừa tạo vào `recent_orders` và thông tin người mua, đồng thời ẩn ngay khối cảnh báo đỏ.
+     - Loại bỏ hoàn toàn lệnh gọi mở lại modal cookie (`openCookieConsentModal`), giữ giao diện ngăn nắp, tập trung.
+  3. **Đơn Giản Hóa Quản Lý CookieBanner (`CookieConsentBanner.tsx` & `ShopContext.tsx`):**
+     - Banner cookie chỉ xuất hiện ở chế độ tự nhiên ban đầu (khi khách mới vào web và chưa chọn), không bị ép mở lại khi hoàn tất đơn hàng.
+  4. **Kiểm Tra & Đóng Gói:**
+     - TypeScript compile: `npm run typecheck` đạt 0 lỗi.
+     - Static Export: `npm run build:frontend` cập nhật toàn diện `frontend/out/` (mã thoát 0).
+
+---
+
+### ADR-32: Chuyển Đổi Tra Cứu Đơn Hàng Thành Trang Riêng "Lịch Sử Mua Hàng" (/orders) & Tra Cứu Linh Hoạt Bằng Số Điện Thoại
+- **Bối cảnh:**
+  1. Người dùng yêu cầu không để chức năng tra cứu đơn hàng thành modal nữa, mà đưa thành một trang riêng là **"Lịch sử mua hàng"** (`/orders`).
+  2. Thực hiện **không bắt buộc phải nhập mã đơn hàng** và có thể **truy xuất tất cả các đơn hàng đã đặt bằng số điện thoại**.
+- **Triển khai chi tiết ([commerce.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/backend/src/commerce.ts), [orders/page.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/orders/page.tsx), [Header.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/Header.tsx), [Providers.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/Providers.tsx), [CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx)):**
+  1. **Nâng Cấp API Tra Cứu Đơn Hàng (`backend/src/commerce.ts`):**
+     - Endpoint `/api/orders/lookup` cho phép tra cứu linh hoạt:
+       * Tra cứu bằng **Số điện thoại** (`phone`): Tự động làm sạch số điện thoại và truy vấn toàn bộ các đơn hàng khớp với số điện thoại đó trong bảng `orders` (`LIMIT 50`).
+       * Tra cứu bằng **Mã đơn hàng** (`code`): Tra cứu theo mã đơn hàng cụ thể.
+       * Kết hợp cả hai: Tra cứu đơn hàng có mã đơn và số điện thoại tương ứng.
+     - Đồng thời truy vấn toàn bộ chi tiết sản phẩm (`order_items`) cho từng đơn hàng (tên giày, size giày, màu sắc, số lượng, đơn giá, ảnh thumbnail).
+     - Trả về cấu trúc mảng `{ orders: enrichedOrders, order: enrichedOrders[0] }`.
+  2. **Trang Riêng Lịch Sử Mua Hàng (`frontend/src/app/orders/page.tsx`):**
+     - Tạo route tĩnh chuẩn mực `/orders` phục vụ qua Cloudflare Worker Assets.
+     - Thiết kế giao diện cao cấp thẻ nổi (Floating Cards), tương thích font `Outfit` và `Plus Jakarta Sans`.
+     - Form tìm kiếm linh hoạt:
+       * Ô nhập **Số điện thoại nhận hàng** (tự động điền nếu đã có thông tin khách).
+       * Ô nhập **Mã đơn hàng** (ghi chú rõ *Không bắt buộc*).
+       * Nút **TRA CỨU LỊCH SỬ ĐƠN HÀNG** với trạng thái loading mượt mà.
+       * Hộp *"Đơn hàng gần đây trên thiết bị"* cho phép bấm tra cứu tức thì các mã đơn vừa đặt.
+     - Danh sách đơn hàng trực quan:
+       * Mỗi đơn hàng được hiển thị trong một thẻ Card sang trọng, đầy đủ mã đơn, ngày giờ đặt, huy hiệu trạng thái (Chờ xác nhận, Đang xử lý, Đang giao hàng, Đã giao thành công, Đã hủy).
+       * Thông tin người nhận, địa chỉ giao hàng và ghi chú đồng kiểm.
+       * Danh sách từng mặt hàng giày đã mua: ảnh đại diện, tên mẫu sneaker, size, màu, số lượng và thành tiền.
+       * Tổng thanh toán in đậm đỏ, chính sách đồng kiểm tận nơi trước khi trả tiền.
+  3. **Tinh Chỉnh Điều Hướng Header & Tối Ưu Nhận Diện (ADR-32.1):**
+     - Xóa hoàn toàn biểu tượng gói hàng (`Package`) bên góc phải `navright` để tránh dư thừa khi đã có link trực tiếp trên thanh menu.
+     - Xóa nút liên kết *"VỀ CHÚNG TÔI"* khỏi thanh điều hướng `navlinks` theo yêu cầu tinh giản trải nghiệm mua hàng.
+     - Chuẩn hóa liên kết trên thanh điều hướng chính thành chữ in hoa toàn bộ: **`LỊCH SỬ MUA HÀNG`** (tiếng Anh: **`PURCHASE HISTORY`**), hài hòa đồng bộ 100% với các mục `TRANG CHỦ`, `SẢN PHẨM`, `CHẠY BỘ`, `THỜI TRANG`, `DÃ NGOẠI`.
+     - Chân trang `Footer.tsx` và màn hình đặt hàng thành công `CartDrawer.tsx` tiếp tục duy trì liên kết tiện ích sang trang `/orders`.
+  4. **Đồng Bộ Khổ Rộng Layout Trang Lịch Sử Mua Hàng Chuẩn 1360px (ADR-32.2):**
+     - **Bối cảnh:** Trang `/orders` trước đây bọc trong `maxWidth: 960px`, trong khi Header, Trang chủ và Trang sản phẩm đều dùng `.wrap` (`max-width: 1360px; margin: auto; padding: 0 32px`). Chênh lệch 400px gây ra khoảng trắng lớn hai bên và mất tính đồng bộ giao diện.
+     - **Khắc phục triệt để:**
+       * Sử dụng container chuẩn `className="wrap"` với khoảng đệm `paddingTop: '32px'`, `paddingBottom: '80px'`.
+       * Mở rộng Card Tra Cứu với `borderRadius: '24px'`, `padding: 'clamp(24px, 3.5vw, 36px)'`, lưới input `minmax(320px, 1fr)`.
+       * Tối ưu Card Đơn Hàng với `borderRadius: '20px'`, `padding: '24px 26px'`, danh sách mặt hàng giày flexbox co giãn hài hòa và hiển thị sắc nét trên khổ rộng 1360px.
+       * Khung Empty State & Chưa có đơn hàng được căn giữa cân đối, thoáng đãng với bo góc 24px và padding `clamp(48px, 6vw, 72px) 24px`.
+  5. **Bổ Sung Breadcrumb Điều Hướng Về Trang Chủ Tại Trang Sản Phẩm (ADR-32.3):**
+     - **Bối cảnh:** Trang `/products` chưa có thanh điều hướng breadcrumb về trang chủ như trang Lịch sử mua hàng (`/orders`), làm giảm tính liên kết điều hướng và sự đồng bộ trải nghiệm mua sắm.
+     - **Khắc phục triệt để:**
+       * Thêm thanh Breadcrumb chuẩn ngữ nghĩa `<nav aria-label="Breadcrumb">` bọc trong container `className="wrap"` với khoảng đệm `paddingTop: '28px'`.
+       * Hiển thị liên kết trang chủ: `<Link href="/">dict.common.nav.home</Link>` kèm biểu tượng phân tách `<ChevronRight size={14} />`.
+       * Hỗ trợ nhận diện danh mục động: Nếu đang lọc theo danh mục (`Running`, `Lifestyle`, `Outdoor`), hiển thị cấu trúc đa tầng `TRANG CHỦ > SẢN PHẨM > [DANH MỤC]`, trong đó `SẢN PHẨM` là liên kết quay về toàn bộ sản phẩm. Nếu ở chế độ mặc định, hiển thị `TRANG CHỦ > SẢN PHẨM`.
+       * Tinh chỉnh `margin: 18px auto 16px` cho `.products-top-banner .story-wrapper` trong `globals.css` để khoảng cách giữa Breadcrumb và StoryBanner đạt tỷ lệ thẩm mỹ cân đối.
+  6. **Chuẩn Hóa In Hoa Tiêu Đề Hero Banner Trang Chủ (ADR-33):**
+     - **Bối cảnh:** Tiêu đề banner lớn trang chủ cần được in hoa để tăng tính mạnh mẽ, năng động thể thao và đồng bộ nhận diện.
+     - **Khắc phục:**
+       * Bản Tiếng Việt (`locales/vi/common.ts`): Cập nhật thành **`VỮNG TỪNG BƯỚC CHẠY.`** và **`TẠO DẤU ẤN RIÊNG.`**.
+       * Bản Tiếng Anh (`locales/en/common.ts`): Cập nhật thành **`WEAR YOUR`** và **`OWN STORY.`**.
+       * Bổ sung `text-transform: uppercase;` vào selector `.hero h1` trong `globals.css` đảm bảo hiển thị in hoa nhất quán 100%.
+  7. **Chuẩn Hóa Sentence Case Cho Toàn Bộ Câu & Tiêu Đề In Đậm Trong Các Modal (ADR-34):**
+     - **Bối cảnh:** Các tiêu đề và cụm in đậm trong 4 modal (Bảng quy đổi cỡ giày, Xem chi tiết sản phẩm, Giỏ hàng/Thanh toán, Modal Cookie) trước đây sử dụng Title Case (viết hoa chữ cái đầu của mỗi từ), gây cảm giác gượng gạo và không chuẩn văn phong tiếng Việt tự nhiên.
+     - **Khắc phục triệt để:**
+       * **Modal Bảng quy đổi cỡ giày** (`SizeGuideModal`):
+         - Tiêu đề modal: **`Bảng quy đổi cỡ giày chuẩn Âu – Á`** (chỉ viết hoa chữ cái đầu câu `B`, danh từ riêng `Âu – Á` giữ hoa).
+         - Tiêu đề hướng dẫn: **`3 bước đo chiều dài bàn chân tại nhà:`**
+       * **Modal Chi tiết sản phẩm** (`ProductDetailModal`):
+         - Cam kết chính hãng: **`100% chính hãng: Bảo đảm nguồn gốc`**
+       * **Modal Giỏ hàng & Thanh toán** (`CartDrawer`):
+         - Tiêu đề thanh toán: **`Thanh toán 1 bước (không cần đăng nhập)`**
+         - Huy hiệu giao hàng: **`Thông tin giao hàng (không cần đăng nhập):`**
+         - Phương thức COD: **`Thanh toán tiền mặt khi nhận hàng (đồng kiểm)`**
+         - Phương thức chuyển khoản: **`Chuyển khoản / quét mã thanh toán ngân hàng`**
+         - Nút duyệt cookie: **`Đồng ý & tiếp tục sử dụng cookie`**
+       * **Modal Trải nghiệm mua sắm & Cookie** (`CookieConsentBanner`):
+         - Tiêu đề modal: **`Trải nghiệm mua sắm & cookie`**
+         - Nút chấp nhận: **`Đồng ý & tiếp tục`**
+         - Cam kết: **`Cam kết bảo mật & không theo dõi bên thứ ba`**
+       * Đồng bộ bản Tiếng Anh tương ứng (`checkoutEn`, `commonEn`).
+  8. **Chuẩn Hóa Tiêu Đề Top 4 Sản Phẩm Bán Chạy Nhất & Xóa Bỏ Hardcoded Text Trong BestSellers (ADR-35):**
+     - **Bối cảnh:** Component `BestSellers.tsx` trước đây bị hardcode các chuỗi text thô và hiển thị category tiếng Anh gốc từ DB (`Running`, `Lifestyle`), gây bất đồng bộ ngôn ngữ trên giao diện tiếng Việt.
+     - **Khắc phục triệt để:**
+       * Khai báo hằng `bestsellers` vào từ điển `vi/common.ts` và `en/common.ts`:
+         - `title`: **`Top 4 sản phẩm bán chạy nhất`** (chỉ viết hoa chữ cái đầu câu theo đúng yêu cầu).
+         - `eyebrow`: **`XU HƯỚNG MUA SẮM · SNEAKER CHÍNH HÃNG`**.
+         - `subtitle`: **`Những mẫu giày thể thao và sneaker biểu tượng được cộng đồng săn đón nhiều nhất tại One - Store.`**.
+         - `rank_prefix`: **`TOP #`**.
+       * Ánh xạ danh mục sản phẩm: Dùng `dict.product.categories_map[item.category] || item.category` để hiển thị chuẩn tiếng Việt (`CHẠY BỘ`, `THỜI TRANG`, `DÃ NGOẠI`) khi chọn tiếng Việt và `RUNNING`, `LIFESTYLE` khi chọn tiếng Anh.
+       * Loại bỏ 100% text hardcoded trong component `BestSellers.tsx`.
+  9. **Tách Biệt Hằng Số Liên Kết Lịch Sử Mua Hàng Giữa Header Và Footer (ADR-36):**
+     - **Bối cảnh:** Footer trước đây dùng chung `dict.common.nav.my_orders` với Header menu (`LỊCH SỬ MUA HÀNG`), khiến dòng liên kết ở chân trang bị in hoa toàn bộ, không hài hòa với các dòng khác.
+     - **Khắc phục:**
+       * Khai báo riêng `dict.common.footer.orders_link: 'Lịch sử mua hàng'` (`en`: `'Purchase history'`).
+       * Duy trì `dict.common.nav.my_orders: 'LỊCH SỬ MUA HÀNG'` trên thanh Header menu chính.
+       * Cập nhật `Footer.tsx` sử dụng `dict.common.footer.orders_link`, hiển thị chuẩn **`Lịch sử mua hàng`** (chỉ viết hoa chữ cái đầu).
+       * Đồng bộ thanh Breadcrumb trang `/orders` sang `TRANG CHỦ > Lịch sử mua hàng`.
+  10. **Chuẩn Hóa Tiêu Đề Danh Mục Tại Trang Sản Phẩm (ADR-37):**
+     - **Bối cảnh:** Tiêu đề `section_title` tại trang sản phẩm trước đây là `Giày Thể Thao & Sneaker Chính Hãng` (viết hoa chữ cái đầu của mọi từ).
+     - **Khắc phục:** Cập nhật `frontend/src/locales/vi/product.ts` thành **`Giày thể thao & Sneaker chính hãng`** (chỉ viết hoa chữ cái đầu tại chữ `Giày` và `Sneaker`, các từ `thể thao` và `chính hãng` viết thường).
+  11. **Chuẩn Hóa Tiêu Đề 4 Thẻ Cam Kết Perks Tại Trang Chủ (ADR-38):**
+     - **Bối cảnh:** Tiêu đề 4 thẻ cam kết Perks tại trang chủ trước đây viết hoa chữ cái đầu của từng từ (`100% Chính Hãng`, `Đổi Cỡ Giày 7 Ngày`, `Miễn Phí Giao Hàng Từ 3 Đôi`, `Tư Vấn Cỡ Giày Chuẩn`).
+     - **Khắc phục:** Cập nhật `frontend/src/locales/vi/common.ts` thành:
+       * **`100% Chính hãng`**
+       * **`Đổi cỡ giày 7 ngày`**
+       * **`Miễn phí giao hàng từ 3 đôi`**
+       * **`Tư Vấn cỡ giày chuẩn`**
+  12. **Đồng Bộ Và Việt Hóa Đường Dẫn Chức Năng (Breadcrumb) Khi Chọn Tab Bóng Rổ (ADR-39):**
+     - **Bối cảnh:** Khi người dùng chọn tab danh mục "Bóng rổ" trên trang sản phẩm (`/products`), đường dẫn chức năng breadcrumb hiển thị bị lệch pha: `TRANG CHỦ > SẢN PHẨM > Basketball` (chưa được Việt hóa và chưa in hoa đồng bộ với các danh mục khác như `CHẠY BỘ`, `THỜI TRANG`, `DÃ NGOẠI`).
+     - **Khắc phục triệt để:**
+       * Bổ sung `basketball: 'BÓNG RỔ'` vào `dict.common.nav` trong [frontend/src/locales/vi/common.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/vi/common.ts) và `basketball: 'BASKETBALL'` trong [frontend/src/locales/en/common.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/common.ts).
+       * Cập nhật hàm `getCategoryLabel(cat)` trong [frontend/src/app/products/page.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/products/page.tsx) kiểm tra `c === 'basketball'` trả về `dict.common.nav.basketball`, fallback qua `dict.product.categories_map[cat].toUpperCase()`.
+       * Đồng bộ pushState URL query `?category=...` khi người dùng bấm chọn các chip category trong [ProductSection.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/ProductSection.tsx).
+       * Kết quả: Breadcrumb hiển thị chuẩn chỉnh **`TRANG CHỦ > SẢN PHẨM > BÓNG RỔ`** (hoặc **`HOME > PRODUCTS > BASKETBALL`** ở chế độ Tiếng Anh).
+  13. **In Hoa Toàn Bộ Tiêu Đề Banner Trang Sản Phẩm (ADR-40):**
+     - **Bối cảnh:** Banner nhỏ đầu trang sản phẩm (`StoryBanner`) trước đây hiển thị tiêu đề `Tinh gọn hơn. / Bản lĩnh hơn.` (Title/Sentence Case).
+     - **Khắc phục:**
+       * Cập nhật [frontend/src/locales/vi/common.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/vi/common.ts): Chuyển `headline_line1` thành **`TINH GỌN HƠN.`** và `headline_line2` thành **`BẢN LĨNH HƠN.`**.
+       * Cập nhật [frontend/src/locales/en/common.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/common.ts): Chuyển `headline_line1` thành **`LESS NOISE.`** và `headline_line2` thành **`MORE YOU.`**.
+       * Bổ sung `text-transform: uppercase;` vào selector `.banner h2` trong [frontend/src/app/globals.css](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/globals.css) đảm bảo hiển thị in hoa đồng bộ và sắc nét.
+  14. **Tách Biệt Hoàn Toàn Luồng "MUA NGAY" Khỏi Giỏ Hàng Chung (ADR-41):**
+     - **Bối cảnh:** Trước đây khi bấm "MUA NGAY" (`buyNow`), hệ thống gọi ngầm `addToCart(item)` và chuyển sang chế độ thanh toán của giỏ hàng. Điều này khiến sản phẩm vừa chọn bị gộp chung vào tất cả các sản phẩm đã có sẵn trong giỏ, ép khách hàng thanh toán cả giỏ và xóa sạch giỏ hàng sau khi đặt hàng thành công.
+     - **Khắc phục triệt để:**
+       * **State độc lập ([ShopContext.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/context/ShopContext.tsx))**: Bổ sung `buyNowItem: CartItem | null` và `setBuyNowItem`. Trong hàm `buyNow(item)`, chỉ gán `buyNowItem` và mở form thanh toán, tuyệt đối **KHÔNG** gọi `addToCart` (giỏ hàng `cart` và badge số lượng trên Header hoàn toàn không bị ảnh hưởng).
+       * **Giao diện đặt hàng nhanh riêng biệt ([CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx))**:
+         - Khi có `buyNowItem` (`isDirectCheckout = true`):
+           + Tiêu đề Drawer hiển thị **`Đặt hàng nhanh (không cần đăng nhập)`** (`direct_checkout_title`).
+           + Thẻ tóm tắt hiển thị huy hiệu đỏ nổi bật **`ĐẶT HÀNG NHANH · SẢN PHẨM ĐÃ CHỌN`** kèm ảnh thu nhỏ, tên giày, cỡ giày, màu sắc và đơn giá của DUY NHẤT sản phẩm đó, kèm ghi chú bảo toàn giỏ hàng.
+           + Tạm tính, phí ship và tổng tiền chỉ tính riêng cho sản phẩm mua ngay.
+           + Khi ấn "Quay lại" hoặc đóng form: Hủy `buyNowItem` và đóng Drawer, không gây xáo trộn giỏ hàng.
+         - Khi thanh toán thành công: Gửi payload chỉ gồm duy nhất sản phẩm mua ngay, lưu mã đơn hàng, hiển thị thông báo thành công và **giữ nguyên 100% các món hàng trong giỏ hàng (`cart`)**.
+       * Khai báo từ điển đa ngữ tương ứng trong [frontend/src/locales/vi/checkout.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/vi/checkout.ts) và [frontend/src/locales/en/checkout.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/checkout.ts).
+  15. **Giới Hạn Số Lượng Tối Thiểu >= 1 & Cơ Chế Checkbox Chọn Mua / Chọn Tất Cả / Xóa Tất Cả Trong Giỏ Hàng (ADR-42):**
+     - **Bối cảnh:**
+       1. Nút trừ số lượng `-` trong giỏ hàng trước đây cho phép giảm về 0, dẫn đến vô tình xóa sản phẩm mà không có sự chủ đích của khách hàng.
+       2. Giỏ hàng thiếu tính năng chọn lọc sản phẩm cần thanh toán (luôn bắt buộc thanh toán toàn bộ giỏ), thiếu nút "Chọn tất cả" và "Xóa tất cả".
+     - **Khắc phục triệt để:**
+       * **Giới hạn số lượng >= 1**:
+         - Cập nhật hàm `updateQuantity` trong [ShopContext.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/context/ShopContext.tsx) áp dụng `Math.max(1, i.quantity + delta)`.
+         - Trong [CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx): Nút trừ `-` bị disabled (`disabled={item.quantity <= 1}`) với hiệu ứng mờ `opacity: 0.35` và con trỏ `not-allowed`. Muốn bỏ sản phẩm, khách hàng sử dụng nút "Xóa" riêng.
+       * **Thanh công cụ Toolbar ("Chọn tất cả", "Xóa tất cả")**:
+         - Đặt đầu danh sách giỏ hàng: Gồm checkbox "Chọn tất cả" hiển thị số lượng chọn `(x/y)` và nút "Xóa tất cả" với icon `Trash2` màu đỏ thể thao.
+       * **Checkbox từng sản phẩm**:
+         - Mỗi dòng sản phẩm có 1 checkbox bên cạnh ảnh. Tự động checked khi thêm mới vào giỏ hàng.
+         - Chỉ những sản phẩm ĐƯỢC CHỌN mới tính vào Tạm tính, thanh Freeship và đưa vào form thanh toán.
+         - Nút "TIẾN HÀNH THANH TOÁN" hiển thị số lượng sản phẩm được chọn và tự động disabled khi chưa chọn món nào.
+         - Khi thanh toán thành công, chỉ những sản phẩm ĐÃ MUA mới được xóa khỏi giỏ hàng (`removeSelectedFromCart`), các sản phẩm chưa tick chọn vẫn lưu lại nguyên vẹn.
+  16. **Đồng Bộ Hoàn Toàn Giao Diện Thanh Toán Giữa Luồng Giỏ Hàng Và Mua Ngay (ADR-43):**
+     - **Bối cảnh:** Trước đây khi chuyển sang màn hình thanh toán, luồng thanh toán giỏ hàng hiển thị một khung tóm tắt đơn hàng màu xám đơn điệu (chỉ chứa text thuần tên sản phẩm, không có ảnh, không có badge), trong khi luồng thanh toán nhanh lại hiển thị card bo góc viền đỏ nhạt, badge `SẢN PHẨM ĐÃ CHỌN`, ảnh giày thu nhỏ và tiêu đề riêng, tạo ra sự thiếu nhất quán về mặt thị giác.
+     - **Khắc phục triệt để:**
+       * **Đồng bộ khối Order Summary ([CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx))**:
+         - Áp dụng chung giao diện card cao cấp cho cả hai luồng thanh toán: Card viền mỏng bo góc 10px nền `#fff9fa`, badge đỏ `SẢN PHẨM ĐÃ CHỌN (SL)`, kèm ảnh thumbnail vuông vức, tên giày in đậm, thông tin cỡ/màu sắc/số lượng và giá tiền đỏ nổi bật cho từng sản phẩm.
+         - Tạm tính của các sản phẩm được thanh toán hiển thị rõ ràng ở góc trên bên phải của card.
+       * **Đồng bộ tiêu đề & thanh Freeship**:
+         - Tiêu đề Drawer Header khi ở Checkout Mode đồng bộ hiển thị **`Đặt hàng nhanh`** (`direct_checkout_title`).
+         - Thanh tiến trình Freeship hiển thị nhất quán ở cả 2 luồng dựa trên tổng số lượng sản phẩm được thanh toán (`activeItems`).
+       * **Điểm khác biệt duy nhất được bảo toàn**:
+         - Thanh toán nhanh: Đặt mua riêng sản phẩm đó, không tác động tới giỏ hàng `cart` hiện tại.
+         - Thanh toán giỏ hàng: Đặt mua các sản phẩm đã tick chọn trong giỏ, sau khi đặt thành công chỉ xóa các sản phẩm đó khỏi giỏ.
+  17. **Khắc Phục Triệt Để Lỗi POST /api/orders 400 Bad Request Khi Đặt Hàng (ADR-44):**
+      - **Bối cảnh:** Khách hàng gặp lỗi `POST /api/orders 400 Bad Request` khi thực hiện đặt hàng trên website.
+      - **Nguyên nhân cốt lõi:**
+        1. Giới hạn Zod schema `color: z.string().max(30)` trong `backend/src/index.ts` quá ngắn. Một số mẫu sneaker (tiêu biểu là dòng giày bóng rổ `Anta KT8 Shock The Game Klay Thompson` có phối màu `Xanh Tím Neon Vịnh San Francisco` dài 32 ký tự) bị Zod validation chặn và trả về lỗi 400.
+        2. Rủi ro lệch độ dài địa chỉ: Backend yêu cầu `min(10)` trong khi Frontend `CartDrawer` cho phép `minLength={8}`, khiến khách hàng nhập địa chỉ 8-9 ký tự bị lỗi 400.
+        3. Rủi ro xử lý voucher và kiểu dữ liệu: Client có thể gửi `product_id` dạng chuỗi hoặc `voucher_code` rỗng.
+      - **Khắc phục triệt để:**
+        * **Nâng cấp Zod Validation Schema ([backend/src/index.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/backend/src/index.ts)):** Mở rộng `color: z.string().min(1).max(100)`, `size: z.string().min(1).max(30)`, `address: z.string().trim().min(5).max(500)`, `product_id: z.coerce.number().int().positive()`, `quantity: z.coerce.number().int().min(1).max(50)`, `voucher_code: z.string().trim().max(50).optional().nullable()`.
+        * **Chuẩn hóa Logic Kiểm Tra:** So khớp size/color bằng `String(...).trim()`, chỉ kiểm tra voucher khi có code thực sự, gán `note || ''` an toàn.
+        * **Đồng bộ Frontend ([CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx)):** Chuẩn hóa payload với `product_id: Number(...)`, `quantity: Math.max(1, Number(...))`, `size: String(...).trim()`, `color: String(...).trim()`, `minLength={5}` cho ô địa chỉ.
+        * **Kiểm thử tự động:** Đặt hàng thành công 100% (Status 201) cả với giày Anta KT8 màu dài 32 ký tự, đặt hàng giỏ hàng nhiều món + voucher ONE10, tra cứu đơn hàng qua API hợp lệ.
+  18. **Loại Bỏ Nút Dấu X Trên Modal Trải Nghiệm Mua Sắm & Cookie (ADR-45):**
+      - **Bối cảnh:** Modal "Trải nghiệm mua sắm & cookie" (`CookieConsentBanner`) trước đây có đồng thời 2 nút đóng: biểu tượng dấu "x" ở góc trên bên phải header và nút "Đóng" ở hàng nút hành động phía dưới. Việc này gây dư thừa điều hướng và lặp lại cùng một nhiệm vụ.
+      - **Khắc phục ([CookieConsentBanner.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CookieConsentBanner.tsx)):**
+        * Loại bỏ hoàn toàn phần tử button chứa icon `X` ở góc phải header.
+        * Dọn dẹp import `X` và `COLORS` không dùng tới.
+        * Header chỉ còn icon `ShieldCheck` và tiêu đề "Trải nghiệm mua sắm & cookie" được căn chỉnh gọn gàng, tinh tế.
+        * Giữ nguyên nút "Đóng" (`cText.decline`) cạnh nút "Đồng ý & tiếp tục" (`cText.accept`) ở phía dưới.
+  19. **Thanh Thông Báo Khi Từ Chối Cookie Ngay Dưới Topbar (ADR-46):**
+      - **Bối cảnh:** Khi người dùng bấm nút "Đóng" tại modal "Trải nghiệm mua sắm & cookie", cần hiển thị một khung màu trắng với chữ màu đen in hoa ngay bên dưới thanh thông báo miễn phí vận chuyển trên cùng, nhắc nhở khách hàng rằng họ đã từ chối cookie và cung cấp nút bấm để đồng ý sử dụng cookie bất kỳ lúc nào; khi bấm đồng ý thì thanh này tự động biến mất.
+      - **Khắc phục triệt để:**
+        * **Quản lý Trạng Thái ([ShopContext.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/context/ShopContext.tsx)):**
+          - Bổ sung `isCookieDeclined: boolean` và `declineCookieConsent: () => void`.
+          - Khi khách hàng bấm "Đóng" trên modal cookie, gọi `declineCookieConsent()` ghi nhận trạng thái từ chối vào `sessionStorage('one:cookie-declined', 'true')` và bật `isCookieDeclined = true`.
+          - Khi khách hàng bấm "Đồng ý cho phép sử dụng cookie", hàm `acceptCookieConsent()` xóa `one:cookie-declined`, thiết lập `cookieConsent = true` và tự động tắt `isCookieDeclined = false`.
+        * **Giao Diện Thanh Nhắc Nhở ([Header.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/Header.tsx)):**
+          - Đặt ngay bên dưới thanh `<div className="announcement">` (MIỄN PHÍ VẬN CHUYỂN TRONG NƯỚC...).
+          - Khung màu trắng tinh khôi (`background: #ffffff`), viền mỏng phía dưới (`borderBottom: 1px solid #e4e4e7`), đổ bóng nhẹ.
+          - Văn bản màu đen viết hoa toàn bộ (`color: #000000; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;`).
+          - Cụm từ hành động **"ĐỒNG Ý CHO PHÉP SỬ DỤNG COOKIE"** là nút bấm gạch chân in đậm (`fontWeight: 900`), hover chuyển đỏ thương hiệu, kích hoạt `acceptCookieConsent()` và loại bỏ thanh ngay lập tức.
+        * **Từ Điển Đa Ngữ ([vi/common.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/vi/common.ts) & [en/common.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/common.ts)):**
+          - Khai báo `declined_bar_prefix` và `declined_bar_action` chuẩn xác, không hardcode string.
+  20. **Mặc Định Hiển Thị Khung Nhắc Cookie Dưới Topbar Cho Đến Khi Chấp Nhận (ADR-47):**
+      - **Bối cảnh:** Thay vì chỉ hiển thị sau khi người dùng bấm nút "Đóng" trên modal, khách hàng yêu cầu khung thông báo màu trắng chữ đen in hoa được hiển thị mặc định ngay khi vào website; và chỉ được loại bỏ hoàn toàn khi khách hàng thực hiện chấp nhận sử dụng cookie.
+      - **Khắc phục ([Header.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/Header.tsx)):**
+        * Chuyển điều kiện hiển thị của khối thông báo từ `isCookieDeclined && !cookieConsent` thành `!cookieConsent`.
+        * Khi khách hàng mới truy cập hoặc chưa đồng ý cookie, thanh thông báo màu trắng chữ đen in hoa luôn hiển thị trang trọng ngay dưới Topbar.
+        * Khi khách hàng bấm "ĐỒNG Ý CHO PHÉP SỬ DỤNG COOKIE" (trên thanh) hoặc "Đồng ý & tiếp tục" (trên modal góc phải), hàm `acceptCookieConsent()` kích hoạt, thiết lập `cookieConsent = true` và tự động loại bỏ khung thông báo này ngay lập tức.
+  21. **Rà Soát Zero-Emoji, Đặt Toàn Bộ Text Thành Hằng & Đồng Bộ 1-1 Song Ngữ VI-EN (ADR-48):**
+      - **Bối cảnh:** Người dùng yêu cầu rà soát toàn diện mã nguồn đảm bảo:
+        1. 100% không chứa icon/emoji thô trong mã nguồn (chỉ sử dụng biểu tượng vector từ `lucide-react`).
+        2. Mọi đoạn text hiển thị đều được đặt thành hằng trong hệ thống từ điển (`frontend/src/locales/`) và mã nguồn gọi qua hằng.
+        3. Toàn bộ text Tiếng Việt và Tiếng Anh đối chiếu tồn tại 1-1 tuyệt đối (không thiếu key, khớp kiểu dữ liệu và chữ ký hàm).
+      - **Kết quả rà soát & khắc phục triệt để:**
+        * **Zero-Emoji Verification**: Quét regex toàn bộ cây thư mục `frontend/src/`, xác nhận **100% không có bất kỳ emoji thô nào**.
+        * **Chuyển Đổi Text Hardcoded Thành Hằng Từ Điển**:
+          - `Sneaker3DViewer.tsx`: Chuyển toàn bộ 10 chuỗi text/aria-label/loading/error thành `dict.common.viewer_3d` (`badge`, `toggle_autorotate_aria`, `stop_rotate`, `start_rotate`, `reset_view_aria`, `default_angle`, `instructions`, `loading_title`, `loading_pbr`, `load_error`).
+          - `CartDrawer.tsx`: Chuyển `Xem lịch sử mua hàng` thành `cText.order_success.view_orders_btn`; chuyển `aria-label="Chọn ..."` thành `cText.select_item_aria(name)`.
+          - `ProductCard.tsx`: Chuyển aria-label & title nút yêu thích thành `pc.wishlist_add_aria`, `pc.wishlist_remove_aria`, `pc.wishlist_saved_title`, `pc.wishlist_save_title`.
+          - `ProductDetailModal.tsx`: Chuyển fallback mô tả sản phẩm thành `pm.default_description`.
+          - `SizeGuideModal.tsx`: Chuyển aria-label nút đóng thành `sg.close_btn_aria`.
+          - `ChatbotWidget.tsx`: Chuyển fallback tiêu đề tài liệu tham khảo thành `cb.default_doc_title`.
+        * **Đồng Bộ Song Ngữ 1-1 Tuyệt Đối Giữa VI và EN**:
+          - Đồng bộ `declined_bar_prefix` tiếng Anh thành `'TO EXPERIENCE ALL FEATURES AND SERVICES OF THE WEBSITE, PLEASE CLICK'` (khớp với bản cập nhật tiếng Việt của người dùng).
+          - Chạy kiểm thử đệ quy tự động `test_deep_compare.mjs` qua toàn bộ 5 module (`common`, `product`, `checkout`, `messages`, `modals`), xác nhận **khớp 1-1 tuyệt đối 100%** giữa VI và EN.
+  22. **Dịch Toàn Diện Tên Màu Sắc Sang Tiếng Anh Chuẩn Sneaker Quốc Tế (ADR-49):**
+      - **Bối cảnh:** Khi người dùng chuyển ngôn ngữ website sang Tiếng Anh (`ENG`), các nhãn màu sắc tại thẻ sản phẩm (`ProductCard`), cửa sổ chi tiết sản phẩm (`ProductDetailModal`), giỏ hàng & thanh toán (`CartDrawer`) và lịch sử tra cứu đơn hàng (`app/orders/page.tsx`) vẫn hiển thị chuỗi Tiếng Việt thô lấy từ cơ sở dữ liệu (`Cam Lửa Bạc`, `Trắng Đen Phối Đỏ Neon`, `Trắng Phối Cam Cháy`, `Vàng Chanh Phối Tím Neon`, v.v.).
+      - **Khắc phục triệt để:**
+        * **Xây dựng Bảng Ánh Xạ Màu Sắc 1-1 (`colors_map`)**:
+          - Trích xuất toàn bộ 115 tên màu sắc độc nhất từ cơ sở dữ liệu sản phẩm.
+          - Bổ sung `colors_map` vào [frontend/src/locales/vi/product.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/vi/product.ts) (ánh xạ chính nó) và [frontend/src/locales/en/product.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/product.ts) với bản dịch tiếng Anh sang trọng, chuẩn thuật ngữ sneaker quốc tế (ví dụ: `Cam Lửa Bạc` → `Silver Fire Orange`, `Trắng Phối Cam Cháy` → `White & Burnt Orange`, `Vàng Chanh Phối Tím Neon` → `Lemon Yellow & Neon Purple`, `All White (Trắng Tinh Khôi)` → `Triple White`, `Trắng Đen (Panda)` → `White Black (Panda)`).
+        * **Cập nhật Giao Diện Hiển Thị**:
+          - [ProductCard.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/ProductCard.tsx): Cả tiêu đề `pc.select_color` kèm màu được chọn và từng pill/chip chọn màu đều hiển thị thông qua `dict.product.colors_map[col] || col`.
+          - [ProductDetailModal.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/ProductDetailModal.tsx): Nhãn `pm.color_label` và các nút chip chọn màu đều hiển thị qua `dict.product.colors_map[col] || col`.
+          - [CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx): Tên màu của sản phẩm trong giỏ và trong danh sách tóm tắt thanh toán đều hiển thị qua `dict.product.colors_map[item.color] || item.color`.
+          - [app/orders/page.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/orders/page.tsx): Tên màu của sản phẩm trong lịch sử tra cứu đơn hàng hiển thị qua `dict.product.colors_map[item.color] || item.color`.
+        * **Bảo Toàn Validation Backend**:
+          - State lưu trữ `selectedColor` và giá trị `item.color` gửi lên backend API `/api/orders` vẫn giữ nguyên chuỗi gốc của DB để validation `validColors.includes(item.color)` ở Backend Worker luôn vượt qua 100%.
+        * **Kiểm Thử & Xuất Bản**:
+          - Kiểm thử đối chiếu đệ quy `test_deep_compare.mjs` đạt 100% khớp 1-1 giữa VI và EN.
+          - `npx tsc --noEmit` đạt 0 lỗi TypeScript.
+          - `npm run build:frontend` xuất bản thành công toàn bộ bundle tĩnh vào `frontend/out/`.
+  23. **Loại Bỏ Hoàn Toàn Các Cụm Từ "(no account needed)" Và "1-Step" Khỏi Toàn Bộ Hệ Thống (ADR-50):**
+      - **Bối cảnh:** Người dùng yêu cầu loại bỏ tất cả các cụm từ liên quan tới `(no account needed)` và `1-Step` (hoặc các biến thể tương đương) khi hiển thị giao diện tiếng Anh, nhằm mang lại trải nghiệm tinh gọn, chuyên nghiệp và tránh lặp từ.
+      - **Khắc phục triệt để:**
+        * [frontend/src/locales/en/checkout.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/checkout.ts):
+          - `checkout_title`: `'1-Step fast checkout (no account needed)'` $\rightarrow$ `'Checkout'` (khớp hoàn toàn với bản Tiếng Việt `'Thanh toán'`).
+          - `direct_checkout_title`: `'1-Step instant order (no account needed)'` $\rightarrow$ `'Fast Checkout'` (khớp với bản Tiếng Việt `'Đặt hàng nhanh'`).
+          - `proceed_checkout`: `'PROCEED TO 1-STEP CHECKOUT'` $\rightarrow$ `'PROCEED TO CHECKOUT'` (khớp với bản Tiếng Việt `'TIẾN HÀNH THANH TOÁN'`).
+          - `guest_badge`: `'Shipping Details (No account required):'` $\rightarrow$ `'Shipping Details:'` (khớp với bản Tiếng Việt `'Thông tin giao hàng:'`).
+        * [frontend/src/locales/en/common.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/common.ts):
+          - `mobile_bar.checkout_sub`: `'(1-Step · COD)'` $\rightarrow$ `'Cash on delivery'` (khớp với bản Tiếng Việt `'Nhận hàng trả tiền'`).
+        * [frontend/src/locales/en/product.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/product.ts):
+          - `modal.buy_now_btn`: `'BUY NOW (1-STEP CHECKOUT)'` $\rightarrow$ `'BUY NOW'` (khớp với bản Tiếng Việt `'MUA NGAY'`).
+          - `modal.add_to_cart_btn`: Chuẩn hóa thành `'+ ADD TO CART'` (khớp với bản Tiếng Việt `'+ THÊM VÀO GIỎ HÀNG'`).
+        * **Dọn Dẹp Cache & Đóng Gói Tĩnh**:
+          - Quét sạch toàn bộ chunk cũ trong `frontend/.chunk-cache` và `frontend/out/_next/static/chunks` chứa các chuỗi này.
+          - Chạy kiểm thử đệ quy tự động `test_deep_compare.mjs` đạt 100% khớp song ngữ 1-1.
+          - Biên dịch TypeScript `npx tsc --noEmit` đạt 0 lỗi.
+          - Xuất bản static export `npm run build:frontend` thành công 100%.
+  24. **Đồng Bộ Song Ngữ Đoạn Mô Tả Sản Phẩm Tại Modal Chi Tiết Cho Toàn Bộ 70 Mẫu Giày (ADR-51):**
+      - **Bối cảnh:** Khi người dùng xem chi tiết sản phẩm (`ProductDetailModal`) ở chế độ Tiếng Anh (`ENG`), trong khi nhãn phân loại, cỡ giày, màu sắc và nút bấm đã được dịch chuẩn, đoạn văn bản mô tả sản phẩm bên dưới giá tiền vẫn hiển thị văn bản Tiếng Việt thô lấy từ cơ sở dữ liệu (`selectedProduct.description`).
+      - **Khắc phục triệt để:**
+        * **Xây dựng Bảng Ánh Xạ Mô Tả Sản Phẩm Song Ngữ (`descriptions_map`)**:
+          - Quét toàn bộ 70 mẫu giày sneaker Âu - Á trong cơ sở dữ liệu (từ ID 101 đến 170).
+          - Bổ sung `descriptions_map` vào [frontend/src/locales/vi/product.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/vi/product.ts) (map ID và tên sang mô tả gốc tiếng Việt) và [frontend/src/locales/en/product.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/product.ts) với bản dịch tiếng Anh chuyên nghiệp, giàu thuật ngữ công nghệ sneaker (PEBA foam, ZoomX, Lightstrike Pro, GORE-TEX, Vibram Megagrip, Wave Plate, Li-Ning BOOM & Jiang Technology, Anta NitroEdge, v.v.).
+        * **Cập nhật Giao Diện Hiển Thị ([ProductDetailModal.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/ProductDetailModal.tsx))**:
+          - Thay thế đoạn render tĩnh bằng cơ chế tra cứu động đa cấp theo ID hoặc tên sản phẩm:
+            `dict.product.descriptions_map[selectedProduct.id] || dict.product.descriptions_map[selectedProduct.name] || selectedProduct.description || pm.default_description`.
+          - Khi ở `vi`, hiển thị mô tả tiếng Việt nguyên bản; khi chuyển sang `en`, tự động hiển thị mô tả tiếng Anh tương ứng.
+        * **Kiểm Thử & Xuất Bản**:
+          - Kiểm thử đối chiếu đệ quy `test_deep_compare.mjs` đạt 100% khớp song ngữ 1-1.
+          - `npx tsc --noEmit` đạt 0 lỗi TypeScript.
+          - `npm run build:frontend` xuất bản toàn bộ bundle tĩnh mới vào `frontend/out/`.
+  25. **Khắc Phục Triệt Để Toàn Bộ Text Chưa Dịch Tại Trang Lịch Sử Mua Hàng (/orders) (ADR-52):**
+      - **Bối cảnh:** Khi người dùng xem trang Lịch sử mua hàng (`orders/page.tsx`) ở chế độ Tiếng Anh (`ENG`), xuất hiện các đoạn text vẫn còn hiển thị Tiếng Việt thô chưa được dịch:
+        1. Số lượng đơn hàng tìm thấy: `Orders found: 9 đơn hàng` (chữ `đơn hàng` bị hardcode).
+        2. Nhãn số điện thoại người nhận: `Số điện thoại: 0395724805` (chữ `Số điện thoại` bị hardcode).
+        3. Ghi chú đơn hàng: `Note: [Hình thức: COD]` (tiền tố `[Hình thức: COD]` lưu trong database chưa được dịch).
+        4. Thanh chính sách đồng kiểm dưới cùng mỗi card đơn: `Chính sách đồng kiểm tận nơi: Kiểm tra đúng mẫu, đúng cỡ giày trước khi thanh toán COD.` (bị hardcode).
+        5. Tiêu đề khối gợi ý tra cứu khi chưa tìm thấy đơn: `Tra cứu toàn bộ lịch sử đơn hàng` (bị hardcode).
+        6. Nhãn gợi ý ô số điện thoại: `(Tra cứu toàn bộ đơn)` (bị hardcode).
+        7. Định dạng ngày giờ: `new Date().toLocaleString('vi-VN')` cố định locale Việt Nam.
+      - **Khắc phục triệt để:**
+        * **Khai báo từ điển song ngữ ([vi/modals.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/vi/modals.ts) & [en/modals.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/modals.ts))**:
+          - Bổ sung `all_orders_tip`: `'(Tra cứu toàn bộ đơn)'` $\leftrightarrow$ `'(Look up all orders)'`.
+          - Bổ sung `orders_suffix`: `'đơn hàng'` $\leftrightarrow$ `'orders'`.
+          - Bổ sung `recipient_phone_label`: `'Số điện thoại:'` $\leftrightarrow$ `'Phone Number:'`.
+          - Bổ sung `inspection_policy`: `'Chính sách đồng kiểm tận nơi: Kiểm tra đúng mẫu, đúng cỡ giày trước khi thanh toán COD.'` $\leftrightarrow$ `'Doorstep inspection policy: Inspect correct model and shoe size before COD payment.'`.
+          - Bổ sung `lookup_all_title`: `'Tra cứu toàn bộ lịch sử đơn hàng'` $\leftrightarrow$ `'Track Complete Order History'`.
+          - Bổ sung `not_found_desc`: Mô tả hướng dẫn kiểm tra lại số điện thoại/mã đơn khi không tìm thấy đơn hàng.
+        * **Đồng bộ mã nguồn ([orders/page.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/orders/page.tsx))**:
+          - Lấy `locale` từ `useShop()`.
+          - Thay toàn bộ các chuỗi hardcode bằng các thuộc tính tương ứng từ `tText` (`dict.modals.tracking`).
+          - Định nghĩa hàm `formatOrderNote(noteStr)` tự động chuyển đổi các tag phương thức thanh toán `[Hình thức: COD]` $\leftrightarrow$ `[Method: COD]` và `[Hình thức: Chuyển khoản QR]` $\leftrightarrow$ `[Method: Bank QR]` theo `locale` đang chọn.
+          - Tự động định dạng thời gian đặt hàng theo `locale === 'en' ? 'en-US' : 'vi-VN'`.
+        * **Đồng bộ tạo đơn hàng mới ([CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx))**:
+          - Khi khách đặt đơn bằng tiếng Anh, tự động lưu tag `[Method: COD]`.
+        * **Kiểm Thử & Đóng Gói**:
+          - Kiểm thử đối chiếu đệ quy `test_deep_compare.mjs` đạt 100% khớp song ngữ 1-1.
+          - `npx tsc --noEmit` đạt 0 lỗi TypeScript.
+          - `npm run build:frontend` xuất bản thành công bản tĩnh ra `frontend/out/`.
+  26. **Viết In Hoa Toàn Bộ "PURCHASE HISTORY" Tại Breadcrumb Trang Đơn Hàng (ADR-53):**
+      - **Bối cảnh:** Tại đường dẫn điều hướng (Breadcrumb) của trang Lịch sử mua hàng (`orders/page.tsx`), phần tử đích trước đây hiển thị chuỗi `Purchase history` (chữ thường) không đồng bộ với phần tử cha `HOME`.
+      - **Khắc phục:**
+        * Trong [orders/page.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/orders/page.tsx): Thay thế `dict.common.footer.orders_link` bằng `dict.common.nav.my_orders`.
+        * Kết quả: Breadcrumb hiển thị in hoa đồng bộ chuẩn xác:
+          - Chế độ Tiếng Anh (`ENG`): **`HOME > PURCHASE HISTORY`**
+          - Chế độ Tiếng Việt (`VIE`): **`TRANG CHỦ > LỊCH SỬ MUA HÀNG`**
+  27. **Kiểm Tra & Đóng Gói:**
+     - TypeScript compile: `npm run typecheck` đạt 0 lỗi.
+     - Static Export: `npm run build:frontend` xuất bản thành công các route tĩnh vào `frontend/out/`.
+  28. **Nâng Cấp Cổng Quản Trị Độc Lập /admin, Xác Thực Tài Khoản / Mật Khẩu PBKDF2 & Hệ Thống Quản Trị Toàn Diện (ADR-54):**
+      - **Bối cảnh:** Cổng admin cũ nhúng qua query `?admin=1` trong AppShell của khách hàng và dùng token thô. Yêu cầu tách hẳn 1 cổng riêng độc lập với cổng public, đăng nhập bằng tài khoản và mật khẩu, trang bị đầy đủ tính năng: quản lý sản phẩm sneaker, quản lý đơn hàng chi tiết, khách hàng & khách tiềm năng (LTV), biểu đồ thống kê trực quan, xuất báo cáo CSV UTF-8 BOM, giao diện cứng cáp đơn giản trực quan.
+      - **Triển khai:**
+        * **Cơ sở dữ liệu D1 (`0009_admin_auth_and_analytics.sql`)**: Tạo bảng `admin_users` và `admin_sessions`, seed tài khoản `admin` / `admin@one.store` với mật khẩu khởi tạo `OneStore@2026` được băm an toàn qua PBKDF2 (salt ngẫu nhiên, 210.000 iterations).
+        * **Backend Router (`backend/src/admin.ts`)**: Cung cấp trọn vẹn API xác thực session (`/api/admin/auth/login`, `/me`, `/logout`), quản lý đơn hàng kèm chi tiết món (`/api/admin/orders/:id`), phân tích khách hàng và phân khúc LTV (`/api/admin/customers/analytics`), biểu đồ thống kê (`/api/admin/analytics/overview`, `revenue-chart`, `top-products`), và xuất báo cáo CSV UTF-8 BOM mở bằng Excel không lỗi font (`/api/admin/export/:type`).
+        * **Giao diện Quản trị Độc lập (`frontend/src/app/admin/page.tsx` & `admin.css`)**: Thiết kế Industrial Minimalist Dashboard theo tông cứng cáp, trực quan; Sidebar cố định 7 tabs nghiệp vụ; Modal chi tiết đơn hàng; Form thêm/sửa sneaker chọn size trực quan (38–45) và upload ảnh R2; Bảng biểu phân khúc khách VIP/Tiềm năng/Mới.
+        * **Tách Biệt Tuyệt Đối**: Xóa bỏ link `?admin=1` khỏi `Footer.tsx` và ẩn toàn bộ widget/modal khách hàng khi ở route `/admin` qua `Providers.tsx`.
+        * **Kiểm Thử & Đóng Gói**: TypeScript compile 0 lỗi, xuất bản static export ra `frontend/out/admin`.
+   29. **Đồng Bộ Thời Gian Đặt Hàng Theo Giờ Máy Tính Truy Cập & Chuẩn Hóa ISO 8601 UTC (ADR-55):**
+       - **Bối cảnh:**
+         * Khách hàng đặt hàng thì hệ thống ghi nhận sai thời gian thực tế (chênh lệch 7 tiếng so với thực tế do SQLite `CURRENT_TIMESTAMP` lưu ngày giờ dạng `YYYY-MM-DD HH:MM:SS` ở múi giờ UTC nhưng thiếu ký tự `Z`, khiến trình duyệt khách parse chuỗi như là giờ local, gây lệch giờ hoặc lỗi hiển thị trên thiết bị).
+       - **Khắc phục triệt để:**
+         * **Gửi thời gian máy tính từ Client ([CartDrawer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/components/CartDrawer.tsx))**:
+           - Khi khách hàng gửi yêu cầu checkout `POST /api/orders`, Client tự động truyền thuộc tính `client_time: new Date().toISOString()` lấy trực tiếp từ đồng hồ máy tính truy cập của khách.
+         * **Backend Lưu Trữ Chuẩn ISO 8601 ([index.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/backend/src/index.ts))**:
+           - Schema `checkoutSchema` nhận trường `client_time: z.string().max(60).optional().nullable()`.
+           - Lệnh lưu `orders` sử dụng `client_time` (hoặc fallback UTC ISO `new Date().toISOString()`), đồng thời trả về `created_at` trong phản hồi `POST /api/orders` (HTTP 201).
+         * **Hàm Tiện Ích Format Thời Gian An Toàn ([api.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/lib/api.ts))**:
+           - Xây dựng hàm `formatDateTime(dateStr, locale)`: Tự động kiểm tra và gắn hậu tố `Z` (UTC) cho các bản ghi đơn hàng cũ từ SQLite thiếu timezone, sau đó chuyển đổi chính xác tuyệt đối sang giờ địa phương máy tính của khách thông qua `d.toLocaleString(locale === 'en' ? 'en-US' : 'vi-VN')`.
+         * **Hiển Thị Đồng Bộ Khắp Giao Diện**:
+           - Màn hình đặt hàng thành công (`CartDrawer.tsx`): Hiển thị ngay dòng thời gian đặt chuẩn giờ máy tính.
+           - Trang lịch sử đơn hàng (`app/orders/page.tsx`): Sử dụng `formatDateTime(ord.created_at, locale)`.
+           - Trang Quản trị (`app/admin/page.tsx`): Hiển thị đúng giờ máy tính quản trị viên trong bảng đơn và modal chi tiết.
+         * **Kiểm Thử**:
+           - Chạy xác minh 5/5 kịch bản qua script test, xác nhận `created_at` khớp chính xác từng mili-giây với thời gian máy tính gửi lên, `npm run build:frontend` xuất bản thành công.
+
+---
+
+   30. **Khởi Tạo Bộ Dữ Liệu Đơn Hàng Giả Lập Toàn Diện Từ 01/2026 Đến Hiện Tại (ADR-56):**
+       - **Bối cảnh:**
+         * Người dùng yêu cầu xóa toàn bộ đơn hàng thử nghiệm cũ và sinh dữ liệu đơn hàng giả lập chuẩn xác, trải dài từ đầu năm 2026 đến nay nhằm phục vụ hiển thị biểu đồ doanh thu, báo cáo và phân khúc khách hàng trên Admin Portal và trang Lịch sử đơn hàng.
+       - **Triển khai chi tiết:**
+         * **Tuân thủ quy trình an toàn (Skill accidental-data-loss-prevention)**: Đã dừng lại và nhận được sự phê duyệt rõ ràng từ người dùng trước khi thực thi lệnh xóa CSDL.
+         * **Xóa sạch dữ liệu cũ**: Xóa toàn bộ bản ghi theo thứ tự ràng buộc khóa ngoại: `DELETE FROM order_events`, `DELETE FROM order_items`, `DELETE FROM orders`.
+         * **Bộ dữ liệu giả lập 175 đơn hàng (`seed_mock_orders_2026.sql`)**:
+           - **Thời gian**: Trải dài đều đặn từ ngày `02/01/2026` đến `02/11/2026` (11 tháng), thời gian đặt từ 8h00 sáng đến 22h30 tối chuẩn giờ Việt Nam và lưu định dạng ISO 8601 UTC.
+           - **Doanh thu thực tế**: Đạt hơn **803.111.000 VNĐ**, giá trị trung bình đơn hàng (AOV) ~ **5.318.000 VNĐ** (khớp với phân khúc giày sneaker authentic từ 1–3 đôi mỗi đơn).
+           - **Trạng thái thực tế**: 151 đơn `completed` (86%), 16 đơn `cancelled` (9%), 5 đơn `shipping`, 2 đơn `confirmed`, 1 đơn `pending` mới nhận.
+           - **Phân khúc 31 khách hàng**: 26 khách VIP (chi tiêu > 10 triệu hoặc từ 3 đơn trở lên), 4 khách tiềm năng, 1 khách mới. Khách hàng thân thiết có lịch sử mua nhiều lần (ví dụ: Trần Phương Đoàn 14 đơn - 79.4 triệu, Lê Thanh Tùng 16 đơn - 60 triệu).
+           - **Sản phẩm & Thương hiệu**: Phân bổ đều trên 70 mẫu giày chính hãng (Salomon ACS Pro, Nike Vaporfly 3, Adidas Samba OG, Salomon XT-4, Salomon XT-6, New Balance 550,...).
+         * **Kiểm Thử**:
+           - Nạp thành công vào CSDL D1 local.
+           - API `/api/admin/analytics/overview` và `/api/admin/customers/analytics` phản hồi chuẩn xác.
+           - Tra cứu số điện thoại trên `/api/orders/lookup` trả về đầy đủ lịch sử đơn hàng kèm danh mục sản phẩm và thời gian máy tính chính xác.
+
+---
+
+   31. **Xây Dựng Bộ Tài Liệu Chính Sách Toàn Diện, Trang /policies Song Ngữ & Nạp Sẵn Tri Thức RAG Chatbot (ADR-57):**
+       - **Bối cảnh:**
+         * Chuẩn bị nền tảng kiến thức thực tế (Ground Truth) phục vụ tích hợp Trợ lý AI Chatbot "Tư vấn One" theo yêu cầu người dùng: Cần xây dựng toàn bộ hệ thống chính sách bán hàng của cửa hàng và hệ thống, đưa lên website trước để khách hàng tra cứu minh bạch và làm tiền đề bộ nhớ cho Chatbot.
+       - **Triển khai chi tiết:**
+         * **Bộ 6 chính sách cốt lõi hoàn chỉnh**:
+           1. *Cam kết Chính hãng 100%*: Bồi hoàn 200% nếu phát hiện hàng giả, sản phẩm nguyên hộp nguyên tag, kiểm định 3 lớp uỷ quyền.
+           2. *Vận chuyển & Đồng kiểm tận nơi*: Freeship toàn quốc từ 3 đôi (hoặc đơn từ 5.000.000đ), đơn dưới 3 đôi đồng giá 30.000đ. Khách hàng được quyền mở hộp kiểm tra đúng mẫu, đúng cỡ giày trước khi thanh toán tiền mặt (COD).
+           3. *Đổi trả & Đổi cỡ 7 ngày*: Miễn phí 100% cước đổi cỡ giày lần đầu tiên trong 7 ngày, đổi sang mẫu khác linh hoạt.
+           4. *Bảo hành chất lượng 6 – 12 tháng*: Bảo hành 6 tháng cho giày marathon Carbon (Vaporfly, Adios Pro, Metaspeed, Feidian) và 12 tháng cho giày Lifestyle/Outdoor (Samba, AF1, 550, XT-6), hỗ trợ dán keo ép nhiệt trọn đời.
+           5. *Bảo mật thông tin & Cookie*: Mua hàng nhanh không cần tài khoản, Cookie Consent Gating minh bạch, cam kết 100% không bán dữ liệu cho bên thứ ba.
+           6. *Cẩm nang chọn cỡ giày chuẩn Âu – Á*: 3 bước đo chiều dài bàn chân tại nhà, bảng quy đổi EUR/US/UK/CM và lời khuyên phom chân bè Á Đông.
+         * **Trang Web /policies Chuyên Biệt ([frontend/src/app/policies/page.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/app/policies/page.tsx))**:
+           - Thiết kế responsive cao cấp, thanh 6 tabs điều hướng ngang mượt mà, hỗ trợ deep-linking URL `?tab=...`.
+           - Song ngữ Việt - Anh 1-1 qua [locales/vi/policies.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/vi/policies.ts) và [locales/en/policies.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/frontend/src/locales/en/policies.ts).
+           - Tích hợp liên kết `CHÍNH SÁCH` trên Header navigation và liên kết từng điều khoản trong Footer.
+         * **Nạp Sẵn Dữ Liệu Vào CSDL Tri Thức Chatbot RAG (`0010_seed_store_policies_knowledge.sql`)**:
+           - Nạp 6 tài liệu chính sách và 13 chunks nội dung chi tiết vào bảng `chat_documents` và `chat_chunks` trong CSDL D1 `fashion_db`.
+         * **Kiểm Thử & Đóng Gói**:
+           - `npx tsc --noEmit` đạt 0 lỗi.
+           - `npm run build:frontend` biên dịch thành công 7/7 pages tĩnh ra `frontend/out/`.
+           - `GET /policies/` phản hồi HTTP 200 OK (22.6 KB).
+
+---
+
+## 3. CẤU TRÚC THƯ MỤC DỰ ÁN HIỆN TẠI
+
+```text
+one-store/
+├── .dev.vars                  # Biến môi trường local (ADMIN_TOKEN, ...)
+├── .dev.vars.example          # File mẫu biến môi trường
+├── AGENTS.md                  # Chỉ dẫn monorepo & liên kết CODE_CONVENTIONS.md
+├── AGENT_MEMORY.md            # [Tài liệu này] Bộ nhớ bối cảnh chi tiết của dự án
+├── CODE_CONVENTIONS.md        # Quy chuẩn lập trình Clean Code bắt buộc
+├── README.md                  # Hướng dẫn dự án & cài đặt chi tiết
+├── STORE_PROFILE.md           # Hồ sơ cửa hàng giày thể thao Âu - Á
+├── package.json               # Scripts root (dev, dev:frontend, build:frontend, typecheck)
+├── wrangler.toml              # Cấu hình Cloudflare Worker, D1, R2, Vectorize, AI, Assets
+│
+├── backend/                   # === PHÂN HỆ BACKEND (Cloudflare Workers + Hono) ===
+│   ├── migrations/            # D1 Database Migrations (0001 -> 0010)
+│   │   ├── 0001_init.sql      # Khởi tạo bảng products, orders, order_items, users
+│   │   ├── 0002_commerce.sql  # Thêm bảng vouchers, customers, tracking
+│   │   ├── 0003_chat_knowledge.sql # Thêm bảng chat_documents, chat_chunks (RAG)
+│   │   ├── 0004_sneakers_data.sql  # Dữ liệu sneaker Âu - Á ban đầu
+│   │   ├── 0005_clean_apparel_and_expand_sneakers.sql # Xóa quần áo, mở rộng 12 sneaker thuần túy
+│   │   ├── 0006_seed_vouchers.sql # Khởi tạo mã voucher ONE10 và ONE50
+│   │   ├── 0007_seed_authentic_market_sneakers.sql # Nạp 70 sneaker thị trường 10 hãng Âu-Á
+│   │   ├── 0008_update_authentic_sneaker_images.sql # Chuẩn hóa 100% ảnh sneaker studio R2
+│   │   ├── 0009_admin_auth_and_analytics.sql # Bảng admin_users, admin_sessions & seed PBKDF2
+│   │   ├── 0010_seed_store_policies_knowledge.sql # Nạp 6 bộ tài liệu chính sách Store cho RAG
+│   │   └── seed_mock_orders_2026.sql # 175 đơn hàng giả lập 11 tháng năm 2026 (>803 triệu VNĐ)
+│   └── src/
+│       ├── index.ts           # Hono app chính, route /api/health, static assets handler
+│       ├── admin.ts           # API router /api/admin/* (Auth, Orders, LTV, Charts, CSV UTF-8 BOM)
+│       ├── commerce.ts        # API nghiệp vụ bán hàng, sản phẩm, đơn hàng, voucher, tra cứu SĐT
+│       └── chatbot.ts         # API chatbot RAG (bge-m3 embedding, Vectorize, Gemma AI)
+│
+└── frontend/                  # === PHÂN HỆ FRONTEND (Next.js 16 App Router) ===
+    ├── next.config.ts         # Next.js config (output: "export", API rewrites khi dev)
+    ├── package.json           # Frontend dependencies (React 19, Next 16, lucide-react, three)
+    ├── tsconfig.json          # TypeScript config frontend
+    ├── out/                   # Thư mục build tĩnh xuất ra để Cloudflare Worker phục vụ
+    ├── public/                # Logo vector (logo.svg, logo-icon.svg, favicon.svg) & Model 3D GLB
+    └── src/
+        ├── app/
+        │   ├── globals.css    # CSS Variables, Design system tokens, Floating card styles
+        │   ├── layout.tsx     # Root layout, Google Fonts (Outfit, Plus Jakarta Sans), SEO
+        │   ├── page.tsx       # Trang chủ Landing Page (Hero 3D, Perks, BestSellers)
+        │   ├── products/
+        │   │   └── page.tsx   # Trang sản phẩm chuyên biệt (StoryBanner, Filter Hub, Lưới giày)
+        │   └── orders/
+        │       └── page.tsx   # Trang riêng Lịch sử mua hàng & Tra cứu đơn theo SĐT
+        ├── components/
+        │   ├── Logo.tsx       # Component Logo vector responsive 3 biến thể
+        │   ├── Header.tsx     # Navigation bar, tìm kiếm, giỏ hàng, thông báo cookie & đa ngữ
+        │   ├── Hero.tsx       # Floating Hero Card phối màu Bred, CTA mua hàng, 3D Canvas
+        │   ├── Sneaker3DViewer.tsx # Trình xem 3D WebGL Three.js cho Nike Jordan 1, xoay 360 độ
+        │   ├── Perks.tsx      # Thanh ưu đãi dịch vụ (Authentic, đổi size 7 ngày, freeship)
+        │   ├── BestSellers.tsx # Top 4 sản phẩm bán chạy nhất trang chủ (ảnh + tên tối giản)
+        │   ├── ProductSection.tsx # Lọc thương hiệu Âu - Á, lọc size giày, sắp xếp, tìm kiếm
+        │   ├── ProductCard.tsx    # Card sản phẩm nổi bật, chọn size nhanh, chọn màu, MUA NGAY
+        │   ├── ProductDetailModal.tsx # Xem chi tiết, mô tả song ngữ (descriptions_map), size
+        │   ├── SizeGuideModal.tsx # Bảng quy đổi size giày chuẩn EUR/US/UK/CM & mẹo đo chân
+        │   ├── StoryBanner.tsx    # Thẻ cam kết chất lượng sang trọng
+        │   ├── Footer.tsx     # Chân trang, quy đổi size, link Lịch sử mua hàng & bản quyền
+        │   ├── CartDrawer.tsx # Drawer giỏ hàng & thanh toán COD rút gọn, Freeship bar từ 3 đôi
+        │   ├── CookieConsentBanner.tsx # Modal chấp thuận cookie vĩnh viễn (nút Đóng & Đồng ý)
+        │   ├── WishlistModal.tsx  # Modal danh sách sản phẩm yêu thích (lưu cookie)
+        │   ├── ChatbotWidget.tsx  # Trợ lý AI tư vấn One (Gemma + BGE-M3 RAG)
+        │   ├── StickyMobileBar.tsx # Thanh bottom bar mua hàng nhanh trên mobile
+        │   └── AdminDashboard.tsx # Trang quản trị toàn diện
+        ├── constants/         # === DESIGN SYSTEM TOKENS ===
+        │   ├── theme.ts       # Mã màu (COLORS), Đổ bóng (SHADOWS), Bo góc (RADII), Phông chữ (FONTS)
+        │   ├── strings.ts     # Re-export từ điển đa ngữ tương thích ngược
+        │   └── index.ts       # Barrel export constants
+        ├── locales/           # === SINGLE SOURCE OF TRUTH (I18N SONG NGỮ 1-1) ===
+        │   ├── vi/            # Từ điển Tiếng Việt thuần túy (common, product, checkout, messages, modals)
+        │   ├── en/            # Từ điển Tiếng Anh quốc tế (chuẩn ngữ cảnh sneaker Âu-Mỹ)
+        │   ├── types.ts       # Định nghĩa chặt chẽ TypeScript schema từ điển đa ngữ
+        │   └── index.ts       # Export bộ từ điển chính cho ShopContext
+        ├── context/
+        │   └── ShopContext.tsx # State toàn cục (Cart, Modals, Filter, CookieConsent, Locale, Dict)
+        ├── lib/
+        │   └── api.ts         # Helper gọi API backend an toàn & format tiền tệ
+        └── types/
+            └── index.ts       # Định nghĩa TypeScript interface (Product, Order, ...)
+```
+
+---
+
+## 4. CHI TIẾT CÁC TỆP ĐÃ SỬA ĐỔI VÀ TẠO MỚI
+
+| Đường dẫn tệp | Hành động | Mô tả chi tiết |
+| :--- | :--- | :--- |
+| `package.json` | Modified | Cập nhật tên `one-store`, auto-touch backend trong script `build:frontend`, script `typecheck`. |
+| `wrangler.toml` | Modified | Cập nhật tên worker `one-store`, trỏ assets về `./frontend/out`, giữ nguyên bindings đám mây. |
+| `CODE_CONVENTIONS.md` | Created | Bộ quy chuẩn lập trình Clean Code bắt buộc 100% cho backend và frontend. |
+| `AGENTS.md` | Modified | Đồng bộ liên kết `CODE_CONVENTIONS.md` và hướng dẫn monorepo cho các agent tiếp theo. |
+| `STORE_PROFILE.md` | Created | Tài liệu hồ sơ cửa hàng giày thể thao, danh mục thương hiệu Âu - Á, chính sách bán hàng. |
+| `AGENT_MEMORY.md` | Created/Updated | Tài liệu bộ nhớ lưu lại toàn bộ 14 quyết định kiến trúc (ADR) và quy trình vận hành. |
+| `backend/migrations/0005_...` | Created | Migration xóa sạch quần áo cũ, nạp 12 mẫu sneaker chính hãng Âu - Á. |
+| `backend/migrations/0006_...` | Created | Migration nạp mã giảm giá mặc định `ONE10` và `ONE50`. |
+| `backend/src/index.ts` | Modified | API `/api/health` trả về `service: "one-store"`, tiền tố mã đơn `ONE-`. |
+| `backend/src/commerce.ts` | Modified | Hỗ trợ regex tra cứu đơn hàng linh hoạt `ONE-`, `VL-`, `BK-`. |
+| `backend/src/chatbot.ts` | Modified | Tối ưu prompt AI `Tư vấn One`, nâng `max_tokens: 1200`, bóc tách reasoning. |
+| `frontend/src/constants/theme.ts` | Created | SSOT cho màu sắc (Trắng/Đỏ/Đen/Xám), fonts (Outfit/Plus Jakarta Sans), shadows, radii. |
+| `frontend/src/constants/strings.ts`| Created | SSOT cho 100% văn bản giao diện tiếng Việt và tiếng Anh dự phòng. |
+| `frontend/src/app/globals.css` | Modified | Cập nhật biến màu, font Outfit, thẻ nổi (card-based), tỷ lệ line-height 1.25. |
+| `frontend/src/app/layout.tsx` | Modified | Tải Google Fonts Outfit + Plus Jakarta Sans, cập nhật metadata tiêu đề & favicon. |
+| `frontend/src/components/*` | Modified | Thay 100% emoji bằng `lucide-react`, áp dụng thẻ nổi, gọi text từ `strings.ts`. |
+| `frontend/src/components/Logo.tsx`| Created | Logo vector độc quyền One - Store (3 biến thể `full`, `icon`, `stacked`). |
+| `frontend/src/components/Sneaker3DViewer.tsx` | Created | Trình xem 3D WebGL Three.js cho Nike Air Jordan 1, ánh sáng studio, xoay 360 độ. |
+| `frontend/src/components/BestSellers.tsx` | Created | Khu vực Top 4 sản phẩm bán chạy nhất dưới Perks (chỉ hiển thị ảnh & tên giày). |
+| `frontend/src/components/CookieConsentBanner.tsx` | Modified | Banner/Modal Cookie đồng bộ trạng thái `isCookieConsentVisible` hiển thị tức thì khi kích hoạt. |
+| `frontend/src/components/ProductCard.tsx` | Modified | Bổ sung hàng chọn màu sắc với chấm màu tròn tinh tế dưới hàng chọn cỡ giày. |
+| `frontend/src/components/SizeGuideModal.tsx` | Modified | Căn giữa màn hình, tăng khoảng đệm padding 36px, đưa thanh cuộn vào bên trong bo góc 24px. |
+| `frontend/src/components/CartDrawer.tsx` | Modified | Cảnh báo in đậm đỏ & nút chấp nhận cookie tại màn hình đặt hàng thành công khi chưa duyệt cookie. |
+| `frontend/src/components/TrackingModal.tsx` | Deprecated | Đã thay thế hoàn toàn bằng trang riêng Lịch sử mua hàng `/orders`. |
+| `frontend/src/app/orders/page.tsx` | Created | Trang riêng Lịch sử mua hàng & Tra cứu đơn theo số điện thoại / mã đơn. |
+| `backend/src/commerce.ts` | Modified | Nâng cấp API `/orders/lookup` hỗ trợ tra cứu toàn bộ đơn theo SĐT (không bắt buộc mã đơn). |
+| `frontend/src/components/Header.tsx` & `Footer.tsx` | Modified | Điều hướng trực tiếp tới `/orders` từ thanh điều hướng và biểu tượng gói hàng. |
+| `frontend/src/context/ShopContext.tsx` | Modified | Bỏ modal `tracking` khỏi `activeModal`, tối ưu hóa state quản lý. |
+| `frontend/src/locales/vi/modals.ts` & `en/modals.ts` | Modified | Cập nhật từ điển trang Lịch sử mua hàng (SĐT, mã đơn tùy chọn, chi tiết sản phẩm). |
+| `frontend/src/locales/vi/checkout.ts` & `en/checkout.ts` | Modified | Bổ sung thông điệp cảnh báo đỏ `cookie_warning` và nhãn nút `cookie_accept_btn`. |
+| `frontend/public/models/nike_air_jordan_1.glb` | Created | Mô hình 3D Nike Jordan 1 nén WebP 18.3MB (< 25MB trần Cloudflare Workers Assets). |
+| `frontend/src/locales/vi/product.ts` & `en/product.ts` | Modified | Bổ sung `colors_map` (115 màu chuẩn quốc tế) và `descriptions_map` (70 mẫu giày sneaker). |
+| `frontend/src/locales/vi/checkout.ts` & `en/checkout.ts` | Modified | Loại bỏ hoàn toàn `(no account needed)` và `1-Step`, chuẩn hóa `Checkout`, `Fast Checkout`, `PROCEED TO CHECKOUT`. |
+| `frontend/src/locales/vi/common.ts` & `en/common.ts` | Modified | Bổ sung `declined_bar_prefix`, `declined_bar_action`, `viewer_3d` chuẩn song ngữ 1-1. |
+| `frontend/src/locales/vi/modals.ts` & `en/modals.ts` | Modified | Bổ sung các trường tra cứu đơn hàng (`all_orders_tip`, `orders_suffix`, `recipient_phone_label`, `inspection_policy`, `lookup_all_title`, `not_found_desc`). |
+| `frontend/src/components/CookieConsentBanner.tsx` | Modified | Loại bỏ nút 'x' ở header, giữ nút 'Đóng', tích hợp trạng thái từ chối cookie `isCookieDeclined`. |
+| `frontend/src/components/Header.tsx` | Modified | Mặc định hiển thị thanh thông báo cookie màu trắng chữ đen in hoa dưới Topbar cho đến khi khách đồng ý. |
+| `frontend/src/components/CartDrawer.tsx` | Modified | Tra cứu song ngữ màu sắc qua `colors_map`, tự động đồng bộ tag `[Method: COD]` khi đặt hàng tiếng Anh. |
+| `backend/migrations/0009_admin_auth_and_analytics.sql` | Created | Bảng `admin_users`, `admin_sessions`, seed tài khoản quản trị mặc định `admin` / `OneStore@2026` qua PBKDF2. |
+| `backend/src/admin.ts` | Created | API router `/api/admin/*` toàn diện (Auth session, Orders chi tiết, Customer LTV, Analytics charts, Export CSV UTF-8 BOM). |
+| `backend/src/index.ts` | Modified | Mount `adminRouter`, nâng cấp hàm `admin(c)` xác thực qua session token CSDL. |
+| `frontend/src/app/admin/admin.css` | Created | CSS giao diện Industrial Minimalist Dashboard cứng cáp, trực quan, không màu mè. |
+| `frontend/src/app/admin/page.tsx` | Created | Cổng quản trị độc lập `/admin` (Login form tài khoản/mật khẩu, Console 7 tabs nghiệp vụ). |
+| `frontend/src/components/Providers.tsx` | Modified | Ẩn toàn bộ modals mua sắm khi ở `/admin`, xóa bỏ hoàn toàn `?admin=1` cũ. |
+| `frontend/src/components/Footer.tsx` | Modified | Xóa bỏ liên kết `?admin=1` khỏi chân trang của khách hàng public. |
+| `frontend/src/types/index.ts` | Modified | Bổ sung `total_items?: number;` vào kiểu dữ liệu `Order`. |
+| `backend/migrations/seed_mock_orders_2026.sql` | Created | Bộ dữ liệu giả lập 175 đơn hàng năm 2026 (doanh thu >803 triệu VNĐ, 31 khách hàng, 5 trạng thái). |
+| `backend/migrations/0010_seed_store_policies_knowledge.sql` | Created | Seed 6 tài liệu chính sách & 13 chunks tri thức vào CSDL D1 cho Chatbot RAG. |
+| `frontend/src/locales/vi/policies.ts` & `en/policies.ts` | Created | Bộ từ điển song ngữ chuẩn 1-1 cho 6 nhóm chính sách bán hàng & dịch vụ khách hàng. |
+| `frontend/src/app/policies/page.tsx` | Created | Trang chính sách bán hàng 6 tabs chuyên biệt (Cam kết, Giao hàng đồng kiểm, Đổi trả 7 ngày, Bảo hành, Bảo mật, Size guide). |
+| `frontend/src/components/Header.tsx` | Modified | Bổ sung liên kết `CHÍNH SÁCH` (`POLICIES`) trên thanh điều hướng chính. |
+| `frontend/src/components/Footer.tsx` | Modified | Cập nhật các liên kết chính sách trỏ trực tiếp sang `/policies?tab=...`. |
+
+---
+
+## 5. BẢNG TRA CỨU LỆNH VẬN HÀNH
+
+```bash
+# 1. Chạy Backend Worker và phục vụ ứng dụng tại local (Port 8787)
+npm run dev
+
+# 2. Chạy Frontend Next.js dev server độc lập (Port 3000, có rewrite API sang 8787)
+npm run dev:frontend
+
+# 3. Biên dịch giao diện tĩnh frontend ra thư mục frontend/out/ và tự động refresh asset manifest
+npm run build:frontend
+
+# 4. Kiểm tra lỗi kiểu TypeScript toàn bộ dự án
+npm run typecheck
+
+# 5. Chạy migration cơ sở dữ liệu D1 local
+npm run db:migrate:local
+
+# 6. Triển khai toàn bộ ứng dụng lên Cloudflare Production
+npm run deploy
+```
+
+---
+
+## 6. HƯỚNG DẪN & NGUYÊN TẮC DÀNH CHO CÁC AGENT TIẾP THEO
+
+1. **Tuân thủ bắt buộc 100% [CODE_CONVENTIONS.md](./CODE_CONVENTIONS.md)**:
+   - Nghiêm cấm đưa emoji/unicode trực tiếp vào chuỗi text hoặc JSX. Bắt buộc dùng `lucide-react`.
+   - Không hardcode chuỗi text hiển thị (luôn thêm vào `strings.ts`).
+   - Không hardcode mã màu tùy tiện (luôn dùng tokens từ `theme.ts`).
+   - Mọi câu lệnh SQL truy vấn D1 phải dùng parameterized query (`.prepare('...').bind(...)`).
+2. **Quy trình build khi thay đổi frontend**:
+   - Mọi thay đổi trong `frontend/src/` phải được biên dịch lại bằng `npm run build:frontend` để cập nhật `frontend/out/`.
+3. **Bảo toàn Cloudflare Remote Bindings**:
+   - Trong `wrangler.toml`, các giá trị `bucket_name = "nhom2-ba-khi-images"` và `index_name = "ba-khi-knowledge"` là các tài nguyên thực tế đã cấp phát trên Cloudflare. Tuyệt đối không tự ý đổi tên.
+4. **Kiểm tra trước khi bàn giao**:
+   - Luôn chạy `npm run typecheck` (đạt 0 lỗi) và `npm run build:frontend` (mã thoát 0).

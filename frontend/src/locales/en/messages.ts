@@ -1,0 +1,15 @@
+export const messagesEn = {
+  add_to_cart_success: (name: string, size: string) => `Added ${name} (Size ${size}) to cart`,
+  buy_now_redirect: (name: string) => `Proceeding to quick checkout for ${name}`,
+  order_success: 'Order placed successfully!',
+  order_failed: 'Failed to place order',
+  empty_cart_alert: 'Your cart is empty',
+  fill_required_fields: 'Please fill in your Name, Phone and Shipping Address',
+  voucher_success: (code: string, discount: string) => `Applied voucher ${code} successfully (-${discount})`,
+  voucher_invalid: 'Invalid or expired voucher code',
+  wishlist_added: 'Added to wishlist',
+  wishlist_removed: 'Removed from wishlist',
+  login_required_wishlist: 'Please sign in to proceed',
+  stock_out_alert: 'Product is currently out of stock',
+  logout_success: 'Logged out successfully',
+};

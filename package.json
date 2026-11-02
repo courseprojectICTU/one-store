@@ -1,0 +1,30 @@
+{
+  "name": "one-store",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "build:frontend": "npm run build --prefix frontend && node scripts/sync-rsc.js && node -e \"require('fs').utimesSync('backend/src/index.ts', new Date(), new Date())\"",
+    "build": "npm run build:frontend",
+    "deploy": "npm run build:frontend && wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply fashion_db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply fashion_db --remote",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.13.14",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261021.1",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.152.0"
+  },
+  "allowScripts": {
+    "esbuild@0.17.19": true,
+    "sharp@0.33.5": true,
+    "workerd@1.20250718.0": true
+  }
+}

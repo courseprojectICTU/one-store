@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 48" width="240" height="48" fill="none">
+  <defs>
+    <linearGradient id="logoOneGrad" x1="6" y1="42" x2="42" y2="6" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1c241b" />
+      <stop offset="100%" stop-color="#2d3d2c" />
+    </linearGradient>
+    <linearGradient id="logoSageGrad" x1="12" y1="36" x2="40" y2="12" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6e8661" />
+      <stop offset="100%" stop-color="#9eb191" />
+    </linearGradient>
+  </defs>
+
+  <!-- ICON (48x48) -->
+  <g transform="translate(0, 0)">
+    <!-- Dynamic Sneaker Outsole Wave / Carbon Plate Curve -->
+    <path 
+      d="M 6 36 C 12 36.5 19 35 25 30.5 C 32 25 37 17 42 9 C 37 13.5 30.5 17 23.5 19 C 16.5 21 11 25.5 8 32 C 7 34 6.5 35 6 36 Z" 
+      fill="url(#logoSageGrad)"
+      opacity="0.95"
+    />
+
+    <!-- Velocity "1" Fin -->
+    <path 
+      d="M 16 17 L 23 11.5 L 25.5 11.5 L 20.8 35 L 15.5 35 L 18.8 19 L 14.5 21 Z" 
+      fill="url(#logoOneGrad)" 
+    />
+
+    <!-- Speed Wing -->
+    <path 
+      d="M 23 17 C 29 15 35 12 41 7 C 37 11 32 14.5 25 17.5 L 24.2 21.5 C 29 19.5 34 17 38 13 C 34 16.5 29.5 19.5 23.5 21.8 Z" 
+      fill="url(#logoOneGrad)"
+    />
+
+    <!-- Base / Tread -->
+    <rect x="13" y="36.5" width="13" height="3" rx="1.5" fill="url(#logoOneGrad)" />
+  </g>
+
+  <!-- TYPOGRAPHY: ONE - STORE. -->
+  <g transform="translate(56, 33)">
+    <text 
+      font-family="'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" 
+      font-size="25" 
+      font-weight="800" 
+      letter-spacing="-0.04em" 
+      fill="#222720"
+    >One - Store<tspan fill="#889e7a" font-weight="900">.</tspan></text>
+  </g>
+</svg>
