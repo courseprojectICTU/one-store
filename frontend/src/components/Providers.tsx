@@ -8,7 +8,6 @@ import SizeGuideModal from '@/components/SizeGuideModal';
 import CartDrawer from '@/components/CartDrawer';
 import CookieConsentBanner from '@/components/CookieConsentBanner';
 import WishlistModal from '@/components/WishlistModal';
-import ChatbotWidget from '@/components/ChatbotWidget';
 import StickyMobileBar from '@/components/StickyMobileBar';
 import Toast from '@/components/Toast';
 
@@ -28,7 +27,6 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <SizeGuideModal />
       <CartDrawer />
       <WishlistModal />
-      <ChatbotWidget />
       <StickyMobileBar />
       <CookieConsentBanner />
       <Toast />

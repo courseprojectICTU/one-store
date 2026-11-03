@@ -1,5 +1,5 @@
 import { commerce, type ShopBindings } from './commerce';
-import { chatbot } from './chatbot';
+
 import { adminRouter, getAdminUser } from './admin';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -117,7 +117,26 @@ app.get('/api/images/:key{.+}', async (c) => {
   if (!/^products\/[a-zA-Z0-9._/-]+$/.test(key) || key.includes('..'))
     return fail('Ảnh không hợp lệ');
   const obj = await c.env.IMAGES.get(key);
-  if (!obj) return fail('Không tìm thấy ảnh', 404);
+  if (!obj) {
+    try {
+      const remoteUrl = `https://one-store.onestoresportsshoes.workers.dev/api/images/${encodeURIComponent(key)}`;
+      const remoteRes = await fetch(remoteUrl);
+      if (remoteRes.ok) {
+        const contentType = remoteRes.headers.get('content-type') || 'image/jpeg';
+        const buffer = await remoteRes.arrayBuffer();
+        await c.env.IMAGES.put(key, buffer, {
+          httpMetadata: { contentType },
+        });
+        const headers = new Headers();
+        headers.set('Content-Type', contentType);
+        headers.set('Cache-Control', 'public, max-age=86400');
+        return new Response(buffer, { headers });
+      }
+    } catch {
+      // Fallback thất bại
+    }
+    return fail('Không tìm thấy ảnh', 404);
+  }
   const headers = new Headers();
   obj.writeHttpMetadata(headers);
   headers.set('etag', obj.httpEtag);
@@ -368,7 +387,7 @@ app.patch('/api/admin/orders/:id', async (c) => {
   return c.json({ ok: Boolean(r.meta.changes) });
 });
 app.route('/api', commerce);
-app.route('/api', chatbot);
+
 app.route('/api', adminRouter);
 app.onError((e, c) => {
   console.error(e);

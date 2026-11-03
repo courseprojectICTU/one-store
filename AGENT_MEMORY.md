@@ -888,6 +888,39 @@ Dự án đã trải qua hành trình nâng cấp toàn diện qua 27 cột mố
 
 ---
 
+   36. **Chuẩn Bị Môi Trường Trắng (Clean State) Để Tái Xây Dựng Chatbot AI RAG Theo Prompt Mẫu Báo Cáo:**
+       - **Bối cảnh & Yêu cầu**: Người dùng cần lấy tư liệu thực tế (hình ảnh thực thi, log terminal, kết quả API) để đưa vào tài liệu báo cáo chuyển đổi số, do đó cần lưu trữ toàn bộ trạng thái hiện tại lên Git, sau đó làm sạch mọi thành phần Chatbot cũ và giữ nguyên vẹn tài liệu hướng dẫn để xây dựng lại từ đầu qua 4 bước prompt.
+       - **Triển khai chi tiết**:
+         * **Lưu trữ toàn vẹn lên Git**: Đã commit (`2a3619b`) và push thành công lên GitHub remote repo `courseprojectICTU/one-store.git` nhánh `main`.
+         * **Dọn dẹp Runtime Code Chatbot**:
+           - Xóa `frontend/src/components/ChatbotWidget.tsx` và unmount khỏi `Providers.tsx`.
+           - Xóa `backend/src/chatbot.ts` và unmount route `/api/chat` khỏi `backend/src/index.ts`.
+           - Xóa `backend/migrations/0010_seed_store_policies_knowledge.sql` để sẵn sàng cho Bước 1 tái tạo.
+         * **Dọn dẹp CSDL D1 Local**:
+           - Xóa sạch 6 documents chính sách (`id LIKE 'doc-%'`) và 13 chunks tri thức cũ trong bảng `chat_documents` và `chat_chunks` của CSDL D1 local nhằm chống trùng lặp khóa chính hoặc chồng chéo nội dung khi chạy Bước 1.
+         * **Bảo tồn 100% tài liệu & công cụ sinh hướng dẫn**:
+           - Giữ nguyên `HUONG_DAN_XAY_DUNG_CHATBOT_AI.txt`.
+           - Giữ nguyên `docs/HUONG_DAN_XAY_DUNG_CHATBOT_AI.docx` (1.5 MB) và `docs/HUONG_DAN_XAY_DUNG_CHATBOT_AI.pdf` (5.0 MB).
+           - Giữ nguyên thư mục ảnh sơ đồ 300 DPI `docs/images/` và các scripts `build_chatbot_doc.py`, `docx_helpers.py`, `convert_to_pdf.py`, `generate_diagrams.py`.
+
+---
+
+   37. **Khắc Phục Triệt Để Lỗi Ảnh 404 Local Dev & Lỗi Xác Thực Đăng Nhập Cổng Admin:**
+       - **Khắc phục lỗi mất ảnh sản phẩm trên local dev (`wrangler dev`)**:
+         * *Nguyên nhân*: Khi đổi bucket R2 sang `one-store-images`, Miniflare local khởi tạo bucket rỗng (0 objects) và CSDL D1 local chưa nhận migration `0014_fix_authentic_sneaker_images.sql`, dẫn đến toàn bộ ảnh trả về 404.
+         * *Khắc phục*:
+           1. Cập nhật đồng bộ 70 `image_key` chính hãng của 70 sản phẩm trong CSDL D1 local khớp 100% với Production.
+           2. Bổ sung cơ chế Fallback Proxy & Local R2 Caching thông minh tại `GET /api/images/:key` trong `backend/src/index.ts`: Tự động kéo ảnh gốc từ Production Worker về lưu vào R2 local Miniflare nếu local chưa có, đảm bảo offline-ready.
+           3. Pre-warm lưu sẵn 70/70 ảnh vào R2 local, nghiệm thu: `LOCAL DEV IMAGE TEST RESULT: 70 SUCCESS, 0 FAILED`.
+       - **Khắc phục lỗi đăng nhập Cổng Admin (`admin` / `OneStore@2026`)**:
+         * *Nguyên nhân*: Bảng `admin_users` trong CSDL D1 local vẫn lưu mã hash cũ của 210.000 iterations PBKDF2, trong khi `backend/src/admin.ts` đã chuẩn hóa sang 100.000 iterations để tương thích giới hạn của Cloudflare Workers Web Crypto.
+         * *Khắc phục*: Cập nhật hash mới `8b6125635a5b8a9d7aabf4258626dcedc3dfdee60e35029a480bcca20c03dd6a` (tương ứng với mật khẩu `OneStore@2026` ở 100k iterations) vào bảng `admin_users` CSDL D1 local. Đăng nhập thành công 100% bằng cả username (`admin`) và email (`admin@one.store`) qua API `POST /api/admin/auth/login` (HTTP 200).
+       - **Làm rõ tính năng Kho Tri Thức AI RAG trên Admin Portal**:
+         * Xác định mục đích quản trị tri thức động chống ảo giác (Ground Truth).
+         * Chuẩn bị sẵn sàng cho Bước 2 xây dựng API `POST /api/admin/knowledge` và `DELETE /api/admin/knowledge/:id`.
+
+---
+
 ## 3. CẤU TRÚC THƯ MỤC DỰ ÁN HIỆN TẠI
 
 ```text
