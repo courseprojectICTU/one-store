@@ -18,7 +18,7 @@ async function derive(password: string, salt: string): Promise<string> {
   ]);
   return hex(
     await crypto.subtle.deriveBits(
-      { name: 'PBKDF2', salt: encoder.encode(salt), iterations: 210000, hash: 'SHA-256' },
+      { name: 'PBKDF2', salt: encoder.encode(salt), iterations: 100000, hash: 'SHA-256' },
       key,
       256,
     ),

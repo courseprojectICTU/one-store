@@ -22,5 +22,5 @@ Toàn bộ lịch sử nâng cấp kiến trúc, các quyết định quan trọ
 3. **Quy tắc quan trọng**:
    - **Frontend Build**: Khi sửa đổi code trong `frontend/src/`, luôn chạy `npm run build:frontend` để cập nhật `frontend/out/`.
    - **Thẩm mỹ giao diện**: Giữ nguyên tính nhất quán, độ tương phản cao, micro-animations và layout responsive chuẩn mực.
-   - **Cloudflare Bindings**: Không tùy ý đổi tên Cloudflare cloud bindings (`nhom2-ba-khi-images`, `ba-khi-knowledge`) trong `wrangler.toml`.
+   - **Cloudflare Bindings**: Không tùy ý đổi tên Cloudflare cloud bindings (`one-store-images`, `ba-khi-knowledge`) trong `wrangler.toml`.
    - **Hồ sơ cửa hàng**: Tham khảo [STORE_PROFILE.md](./STORE_PROFILE.md) cho các thương hiệu giày thể thao Âu - Á và chính sách bán hàng.

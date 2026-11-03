@@ -15,16 +15,16 @@ run_worker_first = ["/api/*"]
 [[d1_databases]]
 binding = "DB"
 database_name = "fashion_db"
-database_id = "115a1bc7-4a78-4a6a-8c95-9f082413ca00"
+database_id = "b19134d6-73da-4049-a70f-f3d0dd24638f"
 migrations_dir = "backend/migrations"
 
 [[kv_namespaces]]
 binding = "CACHE"
-id = "a551e0d5df11345caa3b9e93381e8f1f6"
+id = "6a3663c4632b4c5296f278777d72753e"
 
 [[r2_buckets]]
 binding = "IMAGES"
-bucket_name = "nhom2-ba-khi-images"
+bucket_name = "one-store-images"
 
 [[vectorize]]
 binding = "VECTORIZE"

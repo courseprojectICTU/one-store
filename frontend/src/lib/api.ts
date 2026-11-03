@@ -1,12 +1,12 @@
 import { Product } from '@/types';
 
 export const fallbackImages = [
-  '/api/images/products%2Fef07f4af-f26d-46cf-b134-2db1d920e5a1.jpg',
-  '/api/images/products%2F49c4e8c0-06d5-4dd0-932c-78b39de6e9e2.jpg',
-  '/api/images/products%2F7351f872-5b0d-4454-9202-a80fd9cd9199.jpg',
-  '/api/images/products%2F3dc3f640-b618-4aef-97a5-16f0926a64b2.jpg',
-  '/api/images/products%2Fac357fb3-0b0b-45d1-81bc-3dc1e2b80ac8.jpg',
-  '/api/images/products%2Fce6de2f8-ad8d-455e-8714-7f3c722af26d.jpg',
+  '/api/images/products%2Fdbe88ec4-c0af-4188-91bf-bae4737859a4.jpg',
+  '/api/images/products%2F36241c9b-7e41-4f97-810a-79875c53c0c8.jpg',
+  '/api/images/products%2F5383bf7c-9ce6-421b-934e-5c2d7b7e72d5.webp',
+  '/api/images/products%2F4ebee8ae-452a-4883-b303-ba171b71f089.jpg',
+  '/api/images/products%2Fab1d6056-6664-4b17-8df7-a3d81cac5168.jpg',
+  '/api/images/products%2F3c6f9fea-4f0d-4c80-8404-1f12e31e8f0d.jpg',
 ];
 
 export function money(n: number | string | undefined | null): string {

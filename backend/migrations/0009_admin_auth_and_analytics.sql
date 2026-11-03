@@ -26,7 +26,7 @@ INSERT OR IGNORE INTO admin_users (username, email, password_hash, salt, full_na
 VALUES (
   'admin',
   'admin@one.store',
-  '4ae614239414eda1edc314a0b0a965e8b4e1d4c07147994cd0372377a36a58c0',
+  '8b6125635a5b8a9d7aabf4258626dcedc3dfdee60e35029a480bcca20c03dd6a',
   'onestore_admin_salt_2026',
   'Quản Trị Viên One - Store',
   'superadmin'

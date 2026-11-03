@@ -61,7 +61,7 @@ Dự án đã trải qua hành trình nâng cấp toàn diện qua 27 cột mố
   - **Tên thương hiệu (`One - Store`)**: Cập nhật logo navbar, footer, copyright (`© 2026 One - Store`), metadata title (`One - Store | Giày Thể Thao & Sneaker Chính Hãng`), tiêu đề Admin dashboard, chatbot system prompt.
   - **Tên ngắn gọn (`One`)**: Tên trợ lý chatbot `Tư vấn One`, tiêu đề banner `PHONG CÁCH ONE`, tiền tố mã đơn hàng `ONE-` (VD: `ONE-XXXXXX`), voucher mẫu `ONE10`.
   - **Tương thích ngược (Backward Compatibility)**: Đổi key `localStorage` sang `one-store:cart:v1` kèm fallback đọc `one-fashion:cart:v1`, `sessionStorage` sang `one:member-token:v1`.
-  - **Lưu ý Cloudflare Resources:** Các tài nguyên đám mây đã cấp phát trên Cloudflare (D1 `fashion_db`, R2 bucket `nhom2-ba-khi-images`, Vectorize index `ba-khi-knowledge`) được giữ nguyên tên định danh đám mây trong `wrangler.toml`.
+  - **Lưu ý Cloudflare Resources:** Các tài nguyên đám mây đã cấp phát trên Cloudflare (D1 `fashion_db`, R2 bucket `one-store-images`, Vectorize index `ba-khi-knowledge`) được giữ nguyên tên định danh đám mây trong `wrangler.toml`.
 
 ### ADR-04: Thiết lập Store Giày Thể Thao Âu - Á & RAG Knowledge Base
 - **Bối cảnh:** Xây dựng hồ sơ thông tin ngắn gọn về cửa hàng giày thể thao chính hãng phân phối các thương hiệu Âu - Á nổi tiếng.
@@ -210,7 +210,7 @@ Dự án đã trải qua hành trình nâng cấp toàn diện qua 27 cột mố
 - **Bối cảnh:**
   1. Yêu cầu nghiệp vụ: Đồng bộ danh mục sản phẩm của One - Store với giá bán thực tế thị trường Việt Nam năm 2026, cung cấp hình ảnh chất lượng cao và xây dựng bộ nhớ tri thức toàn diện cho AI Chatbot.
   2. Quy mô: 70 sản phẩm tiêu biểu (7 sản phẩm mỗi hãng) của 10 thương hiệu hợp tác (Nike, Adidas, New Balance, Puma, Salomon, Asics, Onitsuka Tiger, Mizuno, Li-Ning, Anta).
-  3. Yêu cầu kỹ thuật: Tải ảnh trực tiếp vào Cloudflare R2 Bucket nội bộ của shop (`nhom2-ba-khi-images`) thay vì dùng link ngoài, nạp CSDL D1 và vector hóa tri thức vào Cloudflare Vectorize.
+  3. Yêu cầu kỹ thuật: Tải ảnh trực tiếp vào Cloudflare R2 Bucket nội bộ của shop (`one-store-images`) thay vì dùng link ngoài, nạp CSDL D1 và vector hóa tri thức vào Cloudflare Vectorize.
 - **Triển khai chi tiết:**
   1. **Script tự động hóa ([scripts/crawl-and-sync-sneakers.mjs](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/scripts/crawl-and-sync-sneakers.mjs))**:
      - Định nghĩa bộ dữ liệu 70 mẫu sneaker chính hãng với đầy đủ thông số kỹ thuật (bọt đệm, đĩa carbon/wave, độ ôm chân, loại bàn chân, cự ly) và giá thị trường VNĐ (từ 1.890.000₫ đến 6.290.000₫).
@@ -256,7 +256,7 @@ Dự án đã trải qua hành trình nâng cấp toàn diện qua 27 cột mố
      - Trích xuất ảnh góc ngang studio (lateral profile/hero shot) từ các nguồn CDN chính hãng và sàn uy tín: `assets.adidas.com`, `static.nike.com`, `images.puma.com`, `images.stockx.com`, `shopnings.com`, `lining-goods-online`, `anta.com`, `cdna.lystit.com`.
      - Kiểm tra kích thước (>10KB), mime type và magic bytes (JPEG/PNG/WebP).
   2. **Đồng bộ vào Cloudflare R2 & CSDL D1**:
-     - Upload trực tiếp toàn bộ 70 ảnh đạt chuẩn vào R2 Bucket (`nhom2-ba-khi-images`) qua `POST /api/admin/images`.
+     - Upload trực tiếp toàn bộ 70 ảnh đạt chuẩn vào R2 Bucket (`one-store-images`) qua `POST /api/admin/images`.
      - Xuất và thực thi file migration [backend/migrations/0008_update_authentic_sneaker_images.sql](file:///d:/HocTap/HK7/ChuyenDoiSo/project/nhom-2-ba-khi-shop/backend/migrations/0008_update_authentic_sneaker_images.sql) cập nhật 70 câu lệnh `UPDATE products SET image_key = ... WHERE id = ...`.
      - Tỷ lệ thành công: 70/70 sản phẩm (100%).
   3. **Biên dịch & Kiểm thử nghiệm thu**:
@@ -817,6 +817,77 @@ Dự án đã trải qua hành trình nâng cấp toàn diện qua 27 cột mố
 
 ---
 
+
+   32. **Khắc Phục Triệt Để Lỗi Tái Phát Ảnh Không Đồng Bộ Khi Chuyển Sang Tài Khoản Cloudflare Mới (`one-store-images`):**
+       - **Bối cảnh & Nguyên nhân gốc:**
+         * Sau khi kích hoạt R2 và chuyển sang tài khoản Cloudflare mới (`onestoresportsshoes@gmail.com`), do bucket `one-store-images` ban đầu trống, quá trình sync đã vô tình dùng lại danh mục Unsplash tĩnh trong `crawl-and-sync-sneakers.mjs`.
+         * Điều này làm tái phát lỗi lệch thương hiệu và lệch sản phẩm (ADR-22): Anta C202 GT Pro hiển thị giày Puma trắng, Li-Ning Shadow 2 hiển thị giày Nike nâu, Li-Ning Feidian 3.0 hiển thị người mẫu đeo giày Jordan, Mizuno Wave Rebellion Pro 2 hiển thị giày bóng rổ Nike đen.
+       - **Triển khai khắc phục toàn diện theo quy chuẩn ADR-22:**
+         * **Tái kích hoạt Script Đồng Bộ Xác Thực Thương Hiệu ([scripts/sync-authentic-sneaker-images.mjs](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/scripts/sync-authentic-sneaker-images.mjs))**:
+           - Ràng buộc đối sánh thương hiệu nghiêm ngặt: loại trừ 100% tên của 9 thương hiệu đối thủ, kiểm tra từ khóa cấm (`BLACKLIST_WORDS`), magic bytes ảnh JPEG/PNG/WebP.
+           - Thu thập ảnh chụp studio góc ngang chính hãng từ CDN chính thức (`assets.adidas.com`, `images.puma.com`, `images.asics.com`, `images.stockx.com`, `lining-goods-online`, `anta.com`, `antosports.com`, `runrepeat.com`).
+         * **Tải lên R2 & Đồng bộ D1 Remote**:
+           - Tải lên 70/70 ảnh vào bucket `one-store-images` qua endpoint `POST https://one-store.onestoresportsshoes.workers.dev/api/admin/images`.
+           - Cập nhật 70 câu lệnh `UPDATE products SET image_key = ... WHERE id = ...` vào CSDL D1 Remote `fashion_db` qua migration `0014_fix_authentic_sneaker_images.sql`.
+           - Xóa bộ nhớ đệm KV cache key `products:v1` trên namespace binding `CACHE` để khách truy cập nhận ảnh mới ngay lập tức.
+           - Cập nhật mảng `fallbackImages` trong `frontend/src/lib/api.ts`.
+           - Biên dịch `npm run build:frontend` và triển khai `npx wrangler deploy` lên `https://one-store.onestoresportsshoes.workers.dev` (Version ID: `4d9d4e62-89cf-48d4-9c92-a7ddefbd654e`).
+       - **Kết quả nghiệm thu 100%**:
+         * `Anta C202 GT Pro Carbon Racing`: Ảnh chuẩn Anta C202 GT đĩa carbon cam lửa từ đại lý ủy quyền Antosports (51.4 KB, HTTP 200).
+         * `Li-Ning Shadow 2 Double Carbon`: Ảnh chuẩn Li-Ning Shadow 2 đĩa carbon đôi từ CDN Li-Ning (171.9 KB, HTTP 200).
+         * `Li-Ning Feidian 3.0 Elite Carbon`: Ảnh chuẩn Li-Ning Feidian 3.0 Elite trắng từ RunningXpert (28.9 KB, HTTP 200).
+         * `Mizuno Wave Rebellion Pro 2 Carbon`: Ảnh chuẩn Mizuno Wave Rebellion Pro 2 vát gót từ RunRepeat (600.9 KB, HTTP 200).
+
+---
+
+
+   33. **Chuẩn Hóa Thuật Toán PBKDF2 Cho Cổng Quản Trị Admin Trên Cloudflare Workers:**
+       - **Vấn đề phát hiện**: Khi đăng nhập cổng admin tại `/admin`, Cloudflare Workers giới hạn số vòng lặp tối đa của PBKDF2 là 100.000 (`NotSupportedError: Pbkdf2 failed: iteration counts above 100000 are not supported`), trong khi mã nguồn trước đó khai báo 210.000 iterations.
+       - **Khắc phục**:
+         * Chuẩn hóa `iterations: 100000` trong hàm `derive()` tại [backend/src/admin.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/backend/src/admin.ts).
+         * Cập nhật `password_hash` tương ứng với 100.000 iterations cho tài khoản `admin` trong CSDL D1 Remote qua migration `0015_fix_admin_pbkdf2_hash.sql`.
+         * Kiểm thử đăng nhập thực tế cả bằng username (`admin`) và email (`admin@one.store`) với mật khẩu `OneStore@2026` đều thành công 100% (HTTP 200).
+
+---
+
+   34. **Chuẩn Hóa Kiến Trúc Chatbot AI (RAG Pipeline) & Quy Trình 4 Bước Triển Khai Thực Tế:**
+       - **Bối cảnh & Mục tiêu**: Xây dựng tài liệu hướng dẫn kỹ thuật tinh gọn, trực quan hóa toàn bộ kiến trúc Chatbot AI doanh nghiệp ứng dụng mô hình RAG (Retrieval-Augmented Generation) chống ảo giác cho hệ thống ONE STORE, kèm bộ câu lệnh Prompt mẫu cho AI Agent (Cursor, Antigravity, Claude Code) và sơ đồ kiến trúc không chồng chéo.
+       - **Kiến trúc 6 thành phần cốt lõi của hệ thống Chatbot AI**:
+         * *1. Giao diện (Frontend UI Widget)*: Bong bóng chat nổi (Floating Bubble), hộp thoại tin nhắn, hiệu ứng loading typing, tự động cuộn (auto-scroll) và hiển thị nhãn trích dẫn nguồn (Sources).
+         * *2. Cổng điều phối (API Gateway Backend)*: Cloudflare Worker tiếp nhận route `POST /api/chat`, thực hiện kiểm duyệt bảo mật (Guardrails), giới hạn tần suất (Rate Limiting) và điều phối luồng RAG.
+         * *3. Kho dữ liệu gốc (Knowledge Base)*: Bảng `knowledge_documents` trong Cloudflare D1 (SQLite) lưu toàn văn chính sách đổi trả 7 ngày, bảo hành 12 tháng, bảng quy đổi size giày nam/nữ và cẩm nang bảo quản.
+         * *4. Mô hình nhúng (Embedding Model)*: Mô hình `@cf/baai/bge-m3` chuyển đổi câu hỏi và văn bản thành không gian vector toán học 1024 chiều.
+         * *5. Cơ sở dữ liệu Vector (Vector Database)*: Cloudflare Vectorize (Index `ba-khi-knowledge`, 27 vectors 1024d) thực hiện truy vấn quét độ tương đồng Cosine Similarity Top 3-5 đoạn văn khớp nhất (< 30ms).
+         * *6. Mô hình ngôn ngữ lớn (LLM)*: Mô hình `@cf/google/gemma-4-26b-a4b-it` suy luận dựa trên [System Prompt Chống Ảo Giác] + [Context Tri Thức Trích Dẫn] + [Câu Hỏi Khách Hàng] để sinh câu trả lời tự nhiên, thân thiện và chính xác 100%.
+       - **Quy trình 4 bước triển khai thực tế**:
+         * *Bước 1 - Chuẩn bị tri thức & Cắt đoạn (Smart Chunking)*: Thu thập chính sách, cắt đoạn 500-1000 ký tự, có gối đầu (overlap 100 ký tự) để giữ trọn vẹn ngữ cảnh.
+         * *Bước 2 - Vector hóa & Nạp vào Vector DB (Indexing Pipeline)*: Chạy script nạp vector vào Vectorize và lưu toàn văn vào bảng SQL D1.
+         * *Bước 3 - Xây dựng Pipeline RAG Backend (Retrieval + Generation)*: Xây dựng API `/api/chat` kết nối tuần tự: Vector hóa câu hỏi -> Tìm kiếm tương đồng Cosine -> Lấy text gốc từ D1 -> Đóng gói Prompt -> Kích hoạt LLM.
+         * *Bước 4 - Tích hợp Giao diện & Kiểm thử (UI & Evaluation)*: Tích hợp bong bóng chat vào website, kiểm thử 3 kịch bản: hỏi đúng chính sách, hỏi ngoài phạm vi nghiệp vụ và kiểm tra hiển thị sources.
+       - **Chuẩn hóa Sơ đồ Kiến trúc Phân tầng (Zero-Crossing Architecture Diagram)**:
+         * Thiết kế sơ đồ 4 tầng phân lập rõ ràng: Tầng 1 (Client) -> Tầng 2 (Gateway) -> Tầng 3 (AI Core) -> Tầng 4 (Persistence).
+         * Tách biệt 2 luồng hoạt động: Luồng xanh lá `[A1-A4]` (Offline Indexing định kỳ) và Luồng xanh dương `[1-10]` (Online Inference thời gian thực), đảm bảo trực quan, không bị cắt chéo đường nét hay đè chữ.
+       - **Trạng thái lưu trữ**: Đã ghi nhận toàn bộ giải pháp kỹ thuật, tài liệu hướng dẫn và mã nguồn prompt vào bộ nhớ dự án để phục vụ các phiên làm việc tiếp theo.
+
+---
+
+   35. **Thiết Kế Lại Toàn Diện Tài Liệu Hướng Dẫn Xây Dựng Chatbot AI (Kiến Trúc RAG) Ra File Word (.docx) Và PDF (.pdf) (ADR-58):**
+       - **Bối cảnh & Yêu cầu**:
+         * Người dùng yêu cầu thiết kế lại tài liệu kỹ thuật `HUONG_DAN_XAY_DUNG_CHATBOT_AI.txt` theo tiêu chuẩn kỹ thuật chuyên nghiệp: "Ít chữ – Nhiều hình – Dễ hiểu – Dễ thực hiện".
+         * Định dạng xuất bản: Microsoft Word `.docx` (Times New Roman, cỡ 13pt, màu chữ đen, nền trắng, bảng viền đen, khoảng cách dòng 1.2x, đánh số trang, mục lục) và bản xuất PDF `.pdf`.
+         * Cấu trúc chuẩn mực 4 phần:
+           - *Phần I*: Cấu trúc Chatbot AI doanh nghiệp (6 thành phần, sơ đồ kiến trúc 2 luồng Offline Indexing & Online RAG phân lập, lưu ý RAG không loại bỏ ảo giác 100% mà giảm thiểu rủi ro qua tri thức xác thực).
+           - *Phần II*: Quy trình triển khai 4 bước chuẩn mẫu (Template tổng quát cho mọi dự án: Đầu vào → Công việc thực hiện → Đầu ra, các thông số là tham số cấu hình).
+           - *Phần III*: Khung Prompt điều khiển AI Agent (chia nhỏ 4 nhóm tương ứng 4 bước, mỗi bước gồm: Mục đích, Prompt mẫu tổng quát có biến, Prompt thực tế One Store, Khung dán ảnh minh chứng `[ DÁN ẢNH THỰC THI PROMPT BƯỚC ... TẠI ĐÂY ]`, Kết quả; Mục 3.5: Mô hình 6 thành phần Role-Context-Objective-Requirements-Constraints-Output).
+           - *Phần IV*: Kết quả triển khai thực tế One Store (3 khung dán ảnh: Giao diện chatbot, Kết quả Q&A Demo, Kết quả kiểm thử API; Bảng tổng kết nghiệm thu có cột `[Bổ sung kết quả]` không tự bịa số liệu).
+       - **Triển khai chi tiết**:
+         * Tự động sinh 4 sơ đồ trực quan độ phân giải cao 300 DPI (`architecture_diagram.png`, `workflow_diagram.png`, `rag_pipeline_diagram.png`, `prompt_framework_diagram.png`).
+         * Xây dựng script biên tập `scripts/build_chatbot_doc.py` và `scripts/docx_helpers.py` xuất bản `docs/HUONG_DAN_XAY_DUNG_CHATBOT_AI.docx` (1.5 MB).
+         * Tự động chuyển đổi qua Word COM ra `docs/HUONG_DAN_XAY_DUNG_CHATBOT_AI.pdf` (5.0 MB).
+       - **Nghiệm thu**: Đáp ứng 100% các tiêu chí kiểm tra, định dạng Times New Roman 13pt, bảng viền đen, bố cục thoáng đãng và có tính ứng dụng cao cho nhiều dự án.
+
+---
+
 ## 3. CẤU TRÚC THƯ MỤC DỰ ÁN HIỆN TẠI
 
 ```text
@@ -996,6 +1067,6 @@ npm run deploy
 2. **Quy trình build khi thay đổi frontend**:
    - Mọi thay đổi trong `frontend/src/` phải được biên dịch lại bằng `npm run build:frontend` để cập nhật `frontend/out/`.
 3. **Bảo toàn Cloudflare Remote Bindings**:
-   - Trong `wrangler.toml`, các giá trị `bucket_name = "nhom2-ba-khi-images"` và `index_name = "ba-khi-knowledge"` là các tài nguyên thực tế đã cấp phát trên Cloudflare. Tuyệt đối không tự ý đổi tên.
+   - Trong `wrangler.toml`, các giá trị `bucket_name = "one-store-images"` và `index_name = "ba-khi-knowledge"` là các tài nguyên thực tế đã cấp phát trên Cloudflare. Tuyệt đối không tự ý đổi tên.
 4. **Kiểm tra trước khi bàn giao**:
    - Luôn chạy `npm run typecheck` (đạt 0 lỗi) và `npm run build:frontend` (mã thoát 0).

@@ -34,13 +34,13 @@ Mở địa chỉ do Wrangler in ra (thường `http://localhost:8787`). - Cửa
 1. Đăng nhập: `npx wrangler login`.
 2. Tạo D1: `npx wrangler d1 create fashion_db` và sao chép `database_id` vào `wrangler.toml`.
 3. Tạo KV: `npx wrangler kv namespace create CACHE` (hoặc với CLI mới `npx wrangler kv namespace create CACHE`); sao chép namespace ID vào `wrangler.toml`.
-4. Tạo R2: `npx wrangler r2 bucket create nhom2-ba-khi-images`. **R2 có thể yêu cầu kích hoạt thanh toán trong tài khoản Cloudflare**.
+4. Tạo R2: `npx wrangler r2 bucket create one-store-images`. **R2 có thể yêu cầu kích hoạt thanh toán trong tài khoản Cloudflare**.
 5. Tạo Vectorize index cho embedding BGE-M3 (1024 chiều): `npx wrangler vectorize create ba-khi-knowledge --dimensions=1024 --metric=cosine`. Binding `VECTORIZE` trong `wrangler.toml` trỏ tới tên index này.
 6. Workers AI binding được khai báo trong `wrangler.toml`; bật Workers AI cho tài khoản Cloudflare đang deploy.
 7. Tạo secret không đưa vào Git: `npx wrangler secret put ADMIN_TOKEN` rồi nhập chuỗi ngẫu nhiên dài ít nhất 20 ký tự.
 8. Chạy schema + dữ liệu mẫu lên remote: `npm run db:migrate:remote`.
 9. Deploy: `npm run deploy`. Wrangler sẽ trả URL `*.workers.dev` hoặc dùng custom domain.
-10. Mở `https://your-url.workers.dev/?admin=1`, nhập ADMIN_TOKEN, thêm chính sách/FAQ vào mục “Kho tri thức chatbot”; tài liệu được chia đoạn và vector hóa khi lưu.
+10. Mở `https://one-store.onestoresportsshoes.workers.dev/?admin=1`, nhập ADMIN_TOKEN, thêm chính sách/FAQ vào mục “Kho tri thức chatbot”; tài liệu được chia đoạn và vector hóa khi lưu.
 
 Trong local, hãy tạo Vectorize index trên Cloudflare và đăng nhập Wrangler để sử dụng AI/Vectorize; các lời gọi này đi tới tài nguyên remote và có thể phát sinh phí. D1 local cần chạy migration `0003_chat_knowledge.sql`. Nội dung tri thức có thể chứa chính sách giao hàng, đổi trả, hướng dẫn chọn size và thông tin thương hiệu. Chatbot không dùng lịch sử hội thoại làm bộ nhớ dài hạn.
 

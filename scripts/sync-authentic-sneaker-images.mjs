@@ -1,19 +1,15 @@
-/**
- * scripts/sync-authentic-sneaker-images.mjs
- * Tự động tìm kiếm, xác thực và đồng bộ 100% ảnh chụp studio góc ngang chính hãng
- * cho toàn bộ 70 sản phẩm sneaker của 10 thương hiệu hợp tác tại One - Store.
- */
-
 import fs from 'node:fs';
+import path from 'node:path';
 import { execSync } from 'node:child_process';
 
-const API_BASE = 'http://127.0.0.1:8787';
+const projectDir = 'D:/HocTap/HK7/ChuyenDoiSo/project/one-store';
+const API_BASE = 'https://one-store.onestoresportsshoes.workers.dev';
 const ADMIN_TOKEN = 'nhom2_ba_khi_fashion_dev_secret_token_123456789';
 
 const BLACKLIST_WORDS = [
-  't-shirt', 'tshirt', 'shirt', 'tee', 'hoodie', 'jacket', 'pant', 'backpack', 'bag', 
+  't-shirt', 'tshirt', 'shirt', 'tee', 'hoodie', 'jacket', 'pant', 'pants', 'backpack', 'bag', 
   'portrait', 'person', 'model', 'wallpaper', 'drawing', 'sketch', 'cake', 'custom-art',
-  'case', 'sock', 'hat', 'cap'
+  'case', 'sock', 'socks', 'hat', 'cap', 'woman', 'girl', 'man', 'lifestyle-photo'
 ];
 
 function checkMagicBytes(buffer) {
@@ -58,9 +54,10 @@ async function findAuthenticImageForProduct(product) {
   const brandLower = product.brand.toLowerCase();
   const queries = [
     `${product.name} sneaker lateral product`,
-    `${product.name} sneaker isolated white background`,
-    `${product.brand} ${product.name} shoe official`,
-    `${product.name} sneaker`
+    `${product.name} shoe isolated white background`,
+    `${product.brand} ${product.name} official`,
+    `${product.name} sneaker studio`,
+    `${product.name} shoe`
   ];
 
   for (const q of queries) {
@@ -86,8 +83,8 @@ async function findAuthenticImageForProduct(product) {
       if (!brandMatched) continue;
 
       // Reject obvious cross-brand contamination
-      const otherMajorBrands = ['nike', 'adidas', 'puma', 'asics', 'salomon', 'mizuno', 'anta'].filter(b => b !== brandLower);
-      if (brandLower !== 'onitsuka tiger' && otherMajorBrands.some(other => titleLower.includes(other) && !titleLower.includes(brandLower))) {
+      const otherMajorBrands = ['nike', 'adidas', 'puma', 'asics', 'salomon', 'mizuno', 'anta', 'li-ning', 'new balance'].filter(b => b !== brandLower);
+      if (brandLower !== 'onitsuka tiger' && otherMajorBrands.some(other => (titleLower.includes(other) || urlLower.includes(other)) && !titleLower.includes(brandLower))) {
         continue;
       }
 
@@ -97,12 +94,12 @@ async function findAuthenticImageForProduct(product) {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
           },
-          signal: AbortSignal.timeout(7000)
+          signal: AbortSignal.timeout(8000)
         });
         if (!res.ok) continue;
 
         const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length < 10000 || buf.length > 5 * 1024 * 1024) continue; // 10KB - 5MB
+        if (buf.length < 8000 || buf.length > 5 * 1024 * 1024) continue; // 8KB - 5MB
 
         const detected = checkMagicBytes(buf);
         if (!detected) continue;
@@ -119,7 +116,7 @@ async function findAuthenticImageForProduct(product) {
       }
     }
     // Pause briefly between query retries
-    await new Promise(res => setTimeout(res, 200));
+    await new Promise(res => setTimeout(res, 250));
   }
   return null;
 }
@@ -147,7 +144,9 @@ async function uploadToR2(imageInfo) {
 }
 
 async function main() {
-  console.log('=== BẮT ĐẦU ĐỒNG BỘ ẢNH SNEAKER CHÍNH HÃNG CHO ONE - STORE ===\n');
+  console.log('=== BẮT ĐẦU ĐỒNG BỘ ẢNH SNEAKER CHÍNH HÃNG CHO ONE - STORE (ADR-22) ===');
+  console.log(`Endpoint: ${API_BASE}`);
+  console.log(`Target R2: one-store-images\n`);
 
   // 1. Lấy danh sách sản phẩm hiện tại
   const prodsRes = await fetch(`${API_BASE}/api/products`);
@@ -156,11 +155,11 @@ async function main() {
 
   console.log(`Tìm thấy ${products.length} sản phẩm cần đồng bộ ảnh.\n`);
 
-  // Detect brand based on product name
   const brands = ['Nike', 'Adidas', 'New Balance', 'Puma', 'Salomon', 'Asics', 'Onitsuka Tiger', 'Mizuno', 'Li-Ning', 'Anta'];
 
   const results = [];
   const sqlUpdates = [];
+  const uploadedKeys = [];
 
   for (let i = 0; i < products.length; i++) {
     const p = products[i];
@@ -180,6 +179,7 @@ async function main() {
         const r2Key = await uploadToR2(imageInfo);
         console.log(`   -> Tải lên R2 thành công: ${r2Key}`);
         results.push({ id: p.id, name: p.name, brand: p.brand, status: 'SUCCESS', key: r2Key });
+        uploadedKeys.push(r2Key);
         sqlUpdates.push(`UPDATE products SET image_key = '${r2Key}' WHERE id = ${p.id};`);
       } catch (upErr) {
         console.error(`   -> Lỗi upload R2:`, upErr.message);
@@ -190,31 +190,39 @@ async function main() {
       results.push({ id: p.id, name: p.name, brand: p.brand, status: 'NOT_FOUND' });
     }
 
-    // Delay 300ms giữa các request để bảo đảm độ ổn định
-    await new Promise(res => setTimeout(res, 300));
+    // Delay 200ms giữa các sản phẩm
+    await new Promise(res => setTimeout(res, 200));
   }
 
-  // 2. Cập nhật D1 Database
-  console.log('\n=== CẬP NHẬT CSDL D1 VỚI CÁC ẢNH MỚI ===');
+  // 2. Cập nhật D1 Database Remote
+  console.log('\n=== CẬP NHẬT CSDL D1 REMOTE VỚI CÁC ẢNH MỚI ===');
   if (sqlUpdates.length > 0) {
-    const sqlFilePath = 'backend/migrations/0008_update_authentic_sneaker_images.sql';
+    const sqlFilePath = path.join(projectDir, 'backend/migrations/0014_fix_authentic_sneaker_images.sql');
     fs.writeFileSync(sqlFilePath, sqlUpdates.join('\n') + '\n', 'utf8');
     console.log(`Đã xuất ${sqlUpdates.length} câu lệnh UPDATE ra ${sqlFilePath}`);
 
     try {
-      execSync(`npx wrangler d1 execute fashion_db --local --file="${sqlFilePath}"`, { stdio: 'inherit' });
-      console.log('Đã cập nhật thành công toàn bộ image_key vào CSDL D1!');
+      execSync(`npx wrangler d1 execute fashion_db --remote --file="${sqlFilePath}"`, {
+        cwd: projectDir,
+        stdio: 'inherit'
+      });
+      console.log('Đã cập nhật thành công toàn bộ image_key vào CSDL D1 Remote!');
     } catch (dbErr) {
-      console.error('Lỗi khi nạp SQL vào D1:', dbErr.message);
+      console.error('Lỗi khi nạp SQL vào D1 Remote:', dbErr.message);
     }
   }
 
-  // 3. Xóa cache KV products:v1
-  console.log('\n=== LÀM MỚI BỘ NHỚ ĐỆM CACHE ===');
-  try {
-    // Calling API /api/admin/products triggers cache invalidation or we can invoke worker directly
-    console.log('Cache KV sẽ tự động hết hạn sau 60s, hoặc sau khi server restart.');
-  } catch {}
+  // 3. Cập nhật fallbackImages trong frontend/src/lib/api.ts
+  if (uploadedKeys.length >= 6) {
+    console.log(`\nCập nhật fallbackImages trong frontend/src/lib/api.ts...`);
+    const apiTsPath = path.join(projectDir, 'frontend/src/lib/api.ts');
+    let apiContent = fs.readFileSync(apiTsPath, 'utf8');
+    const sampleFallbacks = uploadedKeys.slice(0, 6).map(k => `  '/api/images/${encodeURIComponent(k)}',`).join('\n');
+    const fallbackRegex = /export const fallbackImages = \[[\s\S]*?\];/;
+    apiContent = apiContent.replace(fallbackRegex, `export const fallbackImages = [\n${sampleFallbacks}\n];`);
+    fs.writeFileSync(apiTsPath, apiContent, 'utf8');
+    console.log(`Đã cập nhật fallbackImages thành công!`);
+  }
 
   // 4. Thống kê
   const successCount = results.filter(r => r.status === 'SUCCESS').length;

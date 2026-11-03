@@ -1,0 +1,79 @@
+================================================================================
+          HƯỚNG DẪN XÂY DỰNG CHATBOT AI THÔNG MINH (KIẾN TRÚC RAG)
+================================================================================
+
+I. CẤU TRÚC CỦA MỘT CHATBOT AI DOANH NGHIỆP (6 THÀNH PHẦN CỐT LÕI)
+--------------------------------------------------------------------------------
+Chatbot hiện đại áp dụng mô hình RAG (Retrieval-Augmented Generation) chống ảo giác:
+
+1. GIAO DIỆN (UI Widget):
+   - Cửa sổ chat nổi (Floating Widget) trên Web/App để người dùng nhập câu hỏi.
+2. CỔNG ĐIỀU PHỐI (Backend API):
+   - Nhận câu hỏi, kiểm duyệt bảo mật, gọi các module AI và trả kết quả.
+3. KHO DỮ LIỆU GỐC (Knowledge Base):
+   - CSDL quan hệ (SQL/NoSQL) lưu tài liệu chính sách, thông tin sản phẩm dạng chữ.
+4. MÔ HÌNH NHÚNG (Embedding Model):
+   - Chuyển chữ thành mảng số vector (ví dụ: BGE-M3, OpenAI Ada, Gemini Embedding).
+5. CƠ SỞ DỮ LIỆU VECTOR (Vector Database):
+   - Nơi lưu và tìm kiếm các đoạn văn theo độ tương đồng ngữ nghĩa (Cosine/Euclidean).
+   - Ví dụ: Cloudflare Vectorize, Pinecone, ChromaDB, Milvus.
+6. MÔ HÌNH NGÔN NGỮ LỚN (LLM):
+   - Đọc câu hỏi + trích đoạn tri thức tìm được -> Tổng hợp câu trả lời tự nhiên.
+   - Ví dụ: Google Gemma, Meta Llama, OpenAI GPT-4o.
+
+--------------------------------------------------------------------------------
+II. QUY TRÌNH 4 BƯỚC TRIỂN KHAI THỰC TẾ
+--------------------------------------------------------------------------------
+BƯỚC 1: CHUẨN BỊ TRI THỨC & CẮT ĐOẠN (Chunking)
+   - Thu thập tài liệu: Chính sách, cẩm nang, giá sản phẩm.
+   - Chia nhỏ văn bản thành các đoạn (chunks) 500 - 1000 ký tự, có gối đầu (overlap 100 ký tự).
+
+BƯỚC 2: VECTOR HÓA & NẠP VÀO VECTOR DB (Indexing)
+   - Chạy Embedding Model biến từng đoạn văn thành Vector.
+   - Lưu đồng thời: ID + Chữ gốc vào SQL; ID + Vector vào Vector DB.
+
+BƯỚC 3: XÂY DỰNG PIPELINE RAG BACKEND (Retrieval + Generation)
+   - Khi khách hỏi: Vector hóa câu hỏi -> Tìm Top 3-5 đoạn văn khớp nhất trong Vector DB.
+   - Lấy văn bản tương ứng từ SQL -> Đóng gói vào Prompt gửi cho LLM:
+     [System]: "Bạn là nhân viên tư vấn. Chỉ trả lời dựa vào tài liệu được cấp..."
+     [Context]: "Tài liệu 1:... Tài liệu 2:..."
+     [User]: "Câu hỏi của khách"
+   - LLM sinh câu trả lời kèm tên tài liệu trích dẫn (Sources).
+
+BƯỚC 4: KẾT NỐI GIAO DIỆN & KIỂM THỬ (UI & Evaluation)
+   - Gắn Chat Widget vào Website, gọi API `/api/chat`.
+   - Kiểm thử các trường hợp: Hỏi trúng chính sách, hỏi ngoài phạm vi, hỏi bảo hành.
+
+--------------------------------------------------------------------------------
+III. PROMPT MẪU DÀNH CHO AI AGENT (DÙNG ĐỂ TỰ ĐỘNG VIẾT CODE TỪ A-Z)
+--------------------------------------------------------------------------------
+* Hướng dẫn: Bạn chỉ cần copy toàn bộ đoạn trong khung dưới đây và gửi cho AI Agent 
+(như Antigravity, Cursor, Claude Code, GitHub Copilot) để Agent tự động xây dựng:
+
+---------------------------------[ COPY PROMPT DƯỚI ĐÂY ]---------------------------------
+Hãy đóng vai Kỹ sư AI Full-stack, xây dựng cho tôi hệ thống Chatbot AI tư vấn bán hàng 
+theo kiến trúc RAG (Retrieval-Augmented Generation) hoàn chỉnh gồm Backend và Frontend:
+
+1. YÊU CẦU CÔNG NGHỆ:
+   - Backend API: RESTful API với route `POST /api/chat` nhận `{ "question": "..." }`.
+   - Embedding: Sử dụng mô hình tạo vector ngữ nghĩa (ví dụ: `@cf/baai/bge-m3` hoặc OpenAI text-embedding-3-small).
+   - Vector DB: Truy vấn Top 5 vector tương đồng cao nhất theo Cosine Similarity.
+   - LLM: Sử dụng LLM (ví dụ: Google Gemma hoặc GPT) với System Prompt đóng vai Chuyên viên tư vấn cửa hàng, chỉ trả lời dựa vào dữ liệu được cung cấp, không bịa đặt, có trích dẫn nguồn.
+   - Frontend: Tạo Component Chatbot Widget dạng bong bóng nổi góc màn hình, có danh sách tin nhắn, thanh cuộn tự động, hiển thị nguồn tham khảo (sources).
+
+2. QUY TRÌNH XỬ LÝ CỦA API `/api/chat`:
+   - Bước 1: Validate câu hỏi người dùng (2 - 500 ký tự).
+   - Bước 2: Tạo vector embedding từ câu hỏi.
+   - Bước 3: Tìm Top 3-5 trích đoạn tri thức liên quan nhất từ Vector DB.
+   - Bước 4: Ghép [Câu hỏi] + [Tri thức tìm được] vào System Prompt.
+   - Bước 5: Gọi LLM sinh câu trả lời bằng tiếng Việt lịch sự, súc tích.
+   - Bước 6: Trả về JSON `{ "answer": "...", "sources": ["..."] }`.
+
+3. HÃY TẠO CÁC FILE:
+   - File cấu hình CSDL & Vector DB schema.
+   - File Backend xử lý chia đoạn văn bản (Smart Chunking) và nạp tri thức ban đầu.
+   - File Backend API Chatbot (`/api/chat`).
+   - File Frontend Component Chat Widget tích hợp trực tiếp vào Website.
+Viết code hoàn chỉnh, sạch, có chú thích giải thích ngắn gọn bằng tiếng Việt.
+------------------------------------------------------------------------------------------
+================================================================================
