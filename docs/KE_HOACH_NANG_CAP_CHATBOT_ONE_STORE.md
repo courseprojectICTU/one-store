@@ -6,16 +6,16 @@
 ## 1. TỔNG QUAN, TẦM NHÌN VÀ MỤC TIÊU CHIẾN LƯỢC
 
 ### 1.1 Bối cảnh và Động lực Nâng cấp
-Sau quá trình vận hành thực tế hệ thống **One - Store (Trợ lý "Tư vấn One v1.0")** và đối soát chuyên sâu với kiến trúc của hệ thống **StoreZ (Trợ lý "Speedy")**, đội ngũ kỹ thuật ghi nhận:
+Sau quá trình vận hành thực tế hệ thống **One - Store (Trợ lý "Tư vấn One v1.0")** và đối soát chuyên sâu với kiến trúc của hệ thống **StoreZ (Trợ lý "Speedy")** — đặc biệt sau khi StoreZ chính thức sáp nhập nhánh `cloudflare-native` (loại bỏ hoàn toàn các API bên ngoài như JEV và Cloudinary để chuyển 100% sang Cloudflare Workers AI nội bộ), đội ngũ kỹ thuật ghi nhận:
 - **Thế mạnh độc quyền vượt trội cần bảo tồn và phát huy:**
-  1. **Khả năng chốt đơn đàm thoại tự trị (Agentic In-Chat Ordering):** Tự động thu thập thông tin khách hàng, kiểm tra số lượng tồn kho theo kích thước (size) trong CSDL D1, áp dụng mã ưu đãi `ONE10`, thực hiện giao dịch nguyên tử D1 `batch` tạo mã vận đơn `ONE-YYYYMMDD-XXXX` và sinh Thẻ Xác Nhận Đơn Hàng VIP ngay trong chat.
+  1. **Khả năng chốt đơn đàm thoại tự trị (Agentic In-Chat Ordering):** Tự động thu thập thông tin khách hàng, kiểm tra số lượng tồn kho theo kích thước (size) trong CSDL D1, áp dụng mã ưu đãi `ONE10`, thực hiện giao dịch nguyên tử D1 `batch` tạo mã vận đơn `ONE-YYYYMMDD-XXXX` và sinh Thẻ Xác Nhận Đơn Hàng VIP ngay trong chat. StoreZ hoàn toàn không có tính năng này và vẫn chỉ là Chatbot tra cứu thông tin (Read-Only Info Bot).
   2. **Cơ chế Quản trị Demo Sandbox (Read-Only Data Isolation):** Phân quyền cách ly dữ liệu toàn diện ở tầng Gateway API ([`requireWritePermission`](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/backend/src/admin.ts)) và giao diện trực quan 1-click tại `/admin`, bảo vệ an toàn dữ liệu sản xuất.
   3. **Hạ tầng hoàn toàn độc lập và bảo mật:** Sử dụng 100% mô hình nội bộ Cloudflare Workers AI (`@cf/google/gemma-4-26b-a4b-it` và `@cf/baai/bge-m3`), không phụ thuộc API bên thứ ba, không rò rỉ dữ liệu khách hàng.
   4. **Chuẩn mực thương hiệu cao cấp:** Giao diện Dark & Bred Athletic, Zero-Emoji 100%, hệ thống vector icons `lucide-react` và đồng bộ song ngữ Tiếng Việt - Tiếng Anh (VI - EN).
 - **Khoảng cách công nghệ cần thu hẹp từ bài học StoreZ:**
   1. *Độ trễ phản hồi ban đầu (TTFT):* Giao thức REST JSON đồng bộ hiện tại khiến khách hàng phải chờ từ 1.2 đến 1.8 giây để nhận toàn bộ khối văn bản. Cần chuyển đổi sang **Server-Sent Events (SSE Streaming)** để văn bản xuất hiện theo từng ký tự sau 250 - 350ms.
   2. *Phương thức nhập liệu:* Hiện chỉ hỗ trợ bàn phím gõ chữ. Cần bổ sung **Nhập liệu bằng giọng nói (Voice Input)** qua mô hình nhận dạng âm học **Whisper AI** trên Cloudflare Workers AI.
-  3. *Hiệu quả xử lý câu hỏi xã giao:* Các câu chào hỏi cơ bản ("xin chào", "shop ở đâu", "cảm ơn") hiện vẫn phải đi qua toàn bộ pipeline LLM. Cần bổ sung **Fast Local Pre-Router (0ms)** để phản hồi lập tức dưới 50ms và tiết kiệm tài nguyên AI.
+  3. *Hiệu quả xử lý câu hỏi xã giao:* Các câu chào hỏi cơ bản ("xin chào", "shop ở đâu", "cảm ơn") hiện vẫn phải đi qua toàn bộ pipeline LLM. Cần bổ sung **Fast Local Pre-Router (0ms)** bằng luật Regex cục bộ (tương tự như cách StoreZ vừa tái cấu trúc thành công) để phản hồi lập tức dưới 50ms và tiết kiệm tài nguyên AI.
 
 ### 1.2 Tầm nhìn Phiên bản 2.0 (Vision)
 Nâng cấp Trợ lý "Tư vấn One" trở thành **Hệ thống Trợ lý Bán hàng Hành động Đa phương thức Thời gian thực (Multimodal Real-Time Agentic Conversational Commerce AI)** hàng đầu trong ngành bán lẻ giày thể thao, kết hợp hoàn hảo giữa tốc độ phản hồi tính bằng mili-giây, khả năng nghe hiểu giọng nói chuyên sâu và năng lực hoàn tất đơn hàng tự trị.
@@ -317,3 +317,4 @@ thương hiệu One tiêu chuẩn trích từ hồ sơ         Top-3 chunks     
 Bản kế hoạch nâng cấp Chatbot AI **"Tư vấn One v2.0"** đã giải quyết triệt để các hạn chế hiện tại thông qua việc tiếp thu những tinh hoa công nghệ từ dự án StoreZ (SSE Streaming, Whisper Voice Input, Fast Local Router 0ms), đồng thời bảo vệ và phát huy tối đa các giá trị cốt lõi độc quyền của One - Store (Agentic In-Chat Ordering, Demo Sandbox Admin, Zero-Emoji và Độc lập bảo mật).
 
 Kế hoạch đã sẵn sàng để trình người dùng phê duyệt trước khi tiến hành viết mã nguồn triển khai thực tế theo 4 giai đoạn đã đề ra.
+
