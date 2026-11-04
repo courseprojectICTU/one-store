@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { ShopBindings } from './commerce';
-import { getAdminUser } from './admin';
+import { getAdminUser, requireWritePermission } from './admin';
 
 export const chatbot = new Hono<{ Bindings: ShopBindings }>();
 
@@ -1498,7 +1498,10 @@ chatbot.get('/admin/knowledge', async (c) => {
 
 // 2. Thêm mới tài liệu, tự động Smart Chunking, sinh vector BGE-M3 và Upsert vào Vectorize (kèm Rollback)
 chatbot.post('/admin/knowledge', async (c) => {
-  if (!(await allowedAdmin(c))) return fail('Không có quyền quản trị', 401);
+  const user = await getAdminUser(c);
+  const writeErr = requireWritePermission(user);
+  if (writeErr) return writeErr;
+  if (!user) return fail('Không có quyền quản trị', 401);
 
   const parsed = knowledgeSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
@@ -1579,7 +1582,10 @@ chatbot.post('/admin/knowledge', async (c) => {
 
 // 3. Xóa tài liệu khỏi kho tri thức: Xóa vector trong Vectorize và xóa bản ghi trong D1
 chatbot.delete('/admin/knowledge/:id', async (c) => {
-  if (!(await allowedAdmin(c))) return fail('Không có quyền quản trị', 401);
+  const user = await getAdminUser(c);
+  const writeErr = requireWritePermission(user);
+  if (writeErr) return writeErr;
+  if (!user) return fail('Không có quyền quản trị', 401);
 
   const documentId = c.req.param('id');
   const document = await c.env.DB.prepare('SELECT id, title FROM chat_documents WHERE id = ?')
@@ -1623,7 +1629,10 @@ chatbot.delete('/admin/knowledge/:id', async (c) => {
 
 // 4. API đồng bộ và index toàn bộ các chunks hiện có trong D1 vào Vectorize
 chatbot.post('/admin/knowledge/sync-all', async (c) => {
-  if (!(await allowedAdmin(c))) return fail('Không có quyền quản trị', 401);
+  const user = await getAdminUser(c);
+  const writeErr = requireWritePermission(user);
+  if (writeErr) return writeErr;
+  if (!user) return fail('Không có quyền quản trị', 401);
 
   const chunks = await c.env.DB.prepare(
     'SELECT id, document_id, chunk_index, content FROM chat_chunks ORDER BY document_id, chunk_index',

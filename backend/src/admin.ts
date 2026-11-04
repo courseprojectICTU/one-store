@@ -74,6 +74,17 @@ export async function getAdminUser(c: any): Promise<AdminUserPayload | null> {
   }
 }
 
+export function requireWritePermission(user: AdminUserPayload | null): Response | null {
+  if (!user) return err('Không có quyền truy cập', 401);
+  if (user.role === 'demo' || user.role === 'readonly') {
+    return err(
+      'Chế độ Sandbox: Tài khoản Demo chỉ có quyền xem, không được phép thêm, sửa hoặc xóa dữ liệu.',
+      403,
+    );
+  }
+  return null;
+}
+
 const err = (message: string, status = 400) =>
   new Response(JSON.stringify({ error: message }), {
     status,
@@ -138,6 +149,45 @@ adminRouter.post('/admin/auth/login', async (c) => {
   });
 });
 
+adminRouter.post('/admin/auth/demo-login', async (c) => {
+  const demoAdmin = await c.env.DB.prepare(
+    `SELECT id, username, email, full_name, role, active 
+     FROM admin_users 
+     WHERE username = 'demo' AND active = 1`,
+  ).first<any>();
+
+  if (!demoAdmin) {
+    return err('Tài khoản Demo hiện chưa được kích hoạt', 404);
+  }
+
+  // Tạo token phiên ngẫu nhiên (32 bytes hex) cho Demo Admin
+  const token = generateToken();
+  const tokenHash = await sha(token);
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO admin_sessions (token_hash, admin_id, expires_at)
+       VALUES (?, ?, datetime('now', '+7 days'))`,
+    ).bind(tokenHash, demoAdmin.id),
+    c.env.DB.prepare(
+      `UPDATE admin_users SET last_login = datetime('now') WHERE id = ?`,
+    ).bind(demoAdmin.id),
+  ]);
+
+  return c.json({
+    ok: true,
+    token,
+    user: {
+      id: demoAdmin.id,
+      username: demoAdmin.username,
+      email: demoAdmin.email,
+      full_name: demoAdmin.full_name,
+      role: demoAdmin.role,
+    },
+    message: 'Đăng nhập thành công với quyền Demo Sandbox (Chỉ Xem)',
+  });
+});
+
 adminRouter.get('/admin/auth/me', async (c) => {
   const user = await getAdminUser(c);
   if (!user) return err('Phiên đăng nhập đã hết hạn hoặc không hợp lệ', 401);
@@ -158,6 +208,8 @@ adminRouter.post('/admin/auth/logout', async (c) => {
 
 adminRouter.post('/admin/auth/change-password', async (c) => {
   const user = await getAdminUser(c);
+  const writeErr = requireWritePermission(user);
+  if (writeErr) return writeErr;
   if (!user || user.id === 0) return err('Không có quyền đổi mật khẩu tài khoản này', 403);
 
   const schema = z.object({
@@ -270,6 +322,8 @@ adminRouter.get('/admin/orders/:id', async (c) => {
 
 adminRouter.patch('/admin/orders/:id/status', async (c) => {
   const user = await getAdminUser(c);
+  const writeErr = requireWritePermission(user);
+  if (writeErr) return writeErr;
   if (!user) return err('Không có quyền', 401);
 
   const schema = z.object({

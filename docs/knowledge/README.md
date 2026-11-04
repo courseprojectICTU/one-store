@@ -44,3 +44,4 @@ Hệ thống RAG của One - Store vận hành theo cơ chế kết hợp đa t�
    - Sử dụng đúng tên thương hiệu: **One - Store**, tên ngắn **One**.
    - Định vị: Chuyên phân phối giày thể thao và sneaker chính hãng Âu - Á. Không bán quần áo, phụ kiện thời trang hay hàng trôi nổi.
    - Giữ nghiêm ngặt quy chuẩn Zero-Emoji và tính trung thực tuyệt đối (không bịa đặt giá cả hoặc số lượng tồn kho).
+

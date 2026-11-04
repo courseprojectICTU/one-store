@@ -55,3 +55,4 @@ One - Store chịu trách nhiệm khắc phục miễn phí các lỗi kỹ thu�
 - Khách hàng mang trực tiếp sản phẩm đến cửa hàng One - Store hoặc gửi chuyển phát nhanh về trung tâm bảo hành của One.
 - Thời gian kiểm tra và xử lý kỹ thuật chuyên nghiệp: Từ **3 – 5 ngày làm việc**.
 - Sau khi hoàn tất, One - Store sẽ đóng gói và gửi hoàn trả sản phẩm tận nơi cho khách hàng.
+

@@ -40,3 +40,4 @@ One - Store áp dụng 100% hình thức **Giao Hàng Thu Tiền Tận Nơi (COD
    - *Lưu ý*: Xỏ thử trên bề mặt sạch (đặt bàn chân trên tấm thảm sạch trong nhà hoặc trên giấy gói giày, không bước trực tiếp xuống nền đất cát hoặc đường ngoài trời làm bẩn đế).
 3. **Từ Chối Nhận Hàng Miễn Phí:**
    - Nếu phát hiện hàng giao không đúng mẫu mã, sai kích cỡ hoặc bị lỗi kỹ thuật, khách hàng hoàn toàn có quyền từ chối nhận hàng ngay tại chỗ và gửi lại cho bưu tá mà **KHÔNG MẤT BẤT KỲ MỘT ĐỒNG PHÍ VẬN CHUYỂN NÀO**.
+

@@ -41,3 +41,4 @@ One - Store tuân thủ nghiêm ngặt các tiêu chuẩn bảo mật dữ liệ
 
 - One - Store cam kết **100% KHÔNG BAO GIỜ** bán, cho thuê, thương mại hóa hay tiết lộ số điện thoại, địa chỉ và thông tin mua sắm của khách hàng cho bất kỳ bên thứ ba, đại lý quảng cáo hay mạng lưới tiếp thị nào khác.
 - Mọi dữ liệu giao dịch được mã hóa và bảo vệ an toàn trên nền tảng điện toán đám mây Cloudflare Enterprise.
+

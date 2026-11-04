@@ -73,3 +73,4 @@ Khi khách gửi tin nhắn `"Chốt đơn"` (hoặc click nút xác nhận):
    - Xóa cache: `CACHE.delete('products:v1')`.
 3. Trả về khối dữ liệu `createdOrder`.
 4. Chatbot hiển thị **Thẻ xác nhận đơn hàng VIP** (màu xanh lá tươi, mã đơn có nút copy, nút bấm chuyển hướng trực tiếp tới `/orders?code=ONE-XXXXXX`), đồng thời tự động lưu mã đơn vào lịch sử thiết bị của khách hàng.
+

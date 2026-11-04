@@ -1,6 +1,6 @@
 import { commerce, type ShopBindings } from './commerce';
 
-import { adminRouter, getAdminUser } from './admin';
+import { adminRouter, getAdminUser, requireWritePermission } from './admin';
 import { chatbot } from './chatbot';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -39,6 +39,12 @@ const fail = (message: string, status = 400) =>
 const admin = async (c: any) => {
   const user = await getAdminUser(c);
   return Boolean(user);
+};
+const adminWrite = async (c: any) => {
+  const user = await getAdminUser(c);
+  const writeErr = requireWritePermission(user);
+  if (writeErr) return writeErr;
+  return null;
 };
 const productSchema = z.object({
   name: z.string().trim().min(2).max(150),
@@ -145,7 +151,8 @@ app.get('/api/images/:key{.+}', async (c) => {
   return new Response(obj.body, { headers });
 });
 app.post('/api/admin/images', async (c) => {
-  if (!(await admin(c))) return fail('Không có quyền', 401);
+  const writeErr = await adminWrite(c);
+  if (writeErr) return writeErr;
   const body = await c.req.parseBody();
   const file = body.file;
   if (!(file instanceof File)) return fail('Cần upload file');
@@ -168,7 +175,8 @@ app.post('/api/admin/images', async (c) => {
   return c.json({ key, url: `/api/images/${key}` }, 201);
 });
 app.post('/api/admin/products', async (c) => {
-  if (!(await admin(c))) return fail('Không có quyền', 401);
+  const writeErr = await adminWrite(c);
+  if (writeErr) return writeErr;
   const parsed = productSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return fail(parsed.error.issues[0]?.message || 'Dữ liệu không hợp lệ');
   const p = parsed.data;
@@ -197,7 +205,8 @@ app.post('/api/admin/products', async (c) => {
   }
 });
 app.patch('/api/admin/products/:id', async (c) => {
-  if (!(await admin(c))) return fail('Không có quyền', 401);
+  const writeErr = await adminWrite(c);
+  if (writeErr) return writeErr;
   const parsed = productSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return fail(parsed.error.issues[0]?.message || 'Dữ liệu không hợp lệ');
   const p = parsed.data;
@@ -228,7 +237,8 @@ app.patch('/api/admin/products/:id', async (c) => {
   }
 });
 app.delete('/api/admin/products/:id', async (c) => {
-  if (!(await admin(c))) return fail('Không có quyền', 401);
+  const writeErr = await adminWrite(c);
+  if (writeErr) return writeErr;
   try {
     const r = await c.env.DB.prepare('DELETE FROM products WHERE id=?')
       .bind(c.req.param('id'))
@@ -377,7 +387,8 @@ app.get('/api/admin/orders', async (c) => {
   return c.json({ orders: orders.results });
 });
 app.patch('/api/admin/orders/:id', async (c) => {
-  if (!(await admin(c))) return fail('Không có quyền', 401);
+  const writeErr = await adminWrite(c);
+  if (writeErr) return writeErr;
   const parsed = z
     .object({ status: z.enum(['pending', 'confirmed', 'shipping', 'completed', 'cancelled']) })
     .safeParse(await c.req.json().catch(() => null));

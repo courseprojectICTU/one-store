@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { getAdminUser, requireWritePermission } from './admin';
 export type ShopBindings = {
   DB: D1Database;
   CACHE: KVNamespace;
@@ -306,26 +307,32 @@ commerce.post('/vouchers/check', async (c) => {
   });
 });
 commerce.get('/admin/customers', async (c) => {
-  if (!allowedAdmin(c)) return error(c, 'Không có quyền', 401);
+  const user = await getAdminUser(c);
+  if (!user) return error(c, 'Không có quyền', 401);
   const rows = await c.env.DB.prepare(
     'SELECT id,name,email,created_at FROM customers ORDER BY id DESC LIMIT 200',
   ).all();
   return c.json({ customers: rows.results });
 });
 commerce.get('/admin/overview', async (c) => {
-  if (!allowedAdmin(c)) return error(c, 'Không có quyền', 401);
+  const user = await getAdminUser(c);
+  if (!user) return error(c, 'Không có quyền', 401);
   const r = await c.env.DB.prepare(
     `SELECT (SELECT count(*) FROM products) products,(SELECT count(*) FROM customers) customers,(SELECT count(*) FROM orders) orders,(SELECT count(*) FROM orders WHERE status='pending') pending,(SELECT coalesce(sum(total),0) FROM orders WHERE status='completed') revenue,(SELECT count(*) FROM products WHERE stock<=5) low_stock`,
   ).first();
   return c.json({ overview: r });
 });
 commerce.get('/admin/vouchers', async (c) => {
-  if (!allowedAdmin(c)) return error(c, 'Không có quyền', 401);
+  const user = await getAdminUser(c);
+  if (!user) return error(c, 'Không có quyền', 401);
   const r = await c.env.DB.prepare('SELECT * FROM vouchers ORDER BY code').all();
   return c.json({ vouchers: r.results });
 });
 commerce.post('/admin/vouchers', async (c) => {
-  if (!allowedAdmin(c)) return error(c, 'Không có quyền', 401);
+  const user = await getAdminUser(c);
+  const writeErr = requireWritePermission(user);
+  if (writeErr) return writeErr;
+  if (!user) return error(c, 'Không có quyền', 401);
   const schema = z.object({
     code: z.string().regex(/^[A-Z0-9_-]{3,30}$/),
     discount_type: z.enum(['fixed', 'percent']),
@@ -350,7 +357,10 @@ commerce.post('/admin/vouchers', async (c) => {
   }
 });
 commerce.patch('/admin/vouchers/:code', async (c) => {
-  if (!allowedAdmin(c)) return error(c, 'Không có quyền', 401);
+  const user = await getAdminUser(c);
+  const writeErr = requireWritePermission(user);
+  if (writeErr) return writeErr;
+  if (!user) return error(c, 'Không có quyền', 401);
   const body = z.object({ active: z.boolean() }).safeParse(await c.req.json().catch(() => null));
   if (!body.success) return error(c, 'Dữ liệu không hợp lệ');
   await c.env.DB.prepare('UPDATE vouchers SET active=? WHERE code=?')

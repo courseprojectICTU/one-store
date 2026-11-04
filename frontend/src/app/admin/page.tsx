@@ -263,6 +263,49 @@ export default function AdminPortalPage() {
     }
   }, [isAuthorized, adminToken, loadDashboardData]);
 
+  // Demo Login handler (1-click Sandbox Access)
+  const handleDemoLogin = async () => {
+    setLoginError('');
+    setLoginSubmitting(true);
+    try {
+      const res = await fetch('/api/admin/auth/demo-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        // Fallback login qua API /api/admin/auth/login bình thường
+        const fallbackRes = await fetch('/api/admin/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            usernameOrEmail: 'demo',
+            password: 'DemoAdmin@2026',
+          }),
+        });
+        const fallbackData = await fallbackRes.json();
+        if (!fallbackRes.ok || !fallbackData.ok) {
+          throw new Error(fallbackData.error || 'Không thể đăng nhập tài khoản Demo');
+        }
+        data.token = fallbackData.token;
+        data.user = fallbackData.user;
+      }
+
+      const token = data.token;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('one:admin-token', token);
+      }
+      setAdminToken(token);
+      setAdminUser(data.user);
+      setIsAuthorized(true);
+      showToast('Đang truy cập Cổng Quản Trị với quyền Demo Sandbox (Chỉ Xem)');
+    } catch (err: any) {
+      setLoginError(err.message || 'Lỗi truy cập tài khoản Demo');
+    } finally {
+      setLoginSubmitting(false);
+    }
+  };
+
   // Login handler
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -319,6 +362,10 @@ export default function AdminPortalPage() {
 
   // Order status update
   const handleUpdateOrderStatus = async (orderId: number, newStatus: string) => {
+    if (adminUser?.role === 'demo') {
+      showToast('Chế độ Sandbox: Bạn chỉ có quyền xem, không thể thay đổi trạng thái đơn hàng.');
+      return;
+    }
     setUpdatingOrderStatus(true);
     try {
       const res = await fetch(`/api/admin/orders/${orderId}/status`, {
@@ -414,6 +461,10 @@ export default function AdminPortalPage() {
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (adminUser?.role === 'demo') {
+      showToast('Chế độ Sandbox: Bạn chỉ có quyền xem, không thể thêm hoặc sửa sản phẩm.');
+      return;
+    }
     if (pSizes.length === 0) {
       showToast('Vui lòng chọn ít nhất một kích cỡ giày');
       return;
@@ -480,6 +531,10 @@ export default function AdminPortalPage() {
   };
 
   const handleDeleteProduct = async (id: number) => {
+    if (adminUser?.role === 'demo') {
+      showToast('Chế độ Sandbox: Bạn chỉ có quyền xem, không thể xóa sản phẩm.');
+      return;
+    }
     if (!confirm('Bạn có chắc muốn xóa sản phẩm này khỏi cơ sở dữ liệu?')) return;
     try {
       await api(`/api/admin/products/${id}`, {
@@ -496,6 +551,10 @@ export default function AdminPortalPage() {
   // Voucher Form
   const handleSaveVoucher = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (adminUser?.role === 'demo') {
+      showToast('Chế độ Sandbox: Bạn chỉ có quyền xem, không thể tạo mã giảm giá.');
+      return;
+    }
     setSavingVoucher(true);
     try {
       await api('/api/admin/vouchers', {
@@ -520,6 +579,10 @@ export default function AdminPortalPage() {
   };
 
   const handleToggleVoucher = async (code: string, currentActive: number) => {
+    if (adminUser?.role === 'demo') {
+      showToast('Chế độ Sandbox: Bạn chỉ có quyền xem, không thể đổi trạng thái mã giảm giá.');
+      return;
+    }
     try {
       await api(`/api/admin/vouchers/${encodeURIComponent(code)}`, {
         method: 'PATCH',
@@ -536,6 +599,10 @@ export default function AdminPortalPage() {
   // Knowledge Form
   const handleSaveKnowledge = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (adminUser?.role === 'demo') {
+      showToast('Chế độ Sandbox: Bạn chỉ có quyền xem, không thể nạp thêm tài liệu tri thức.');
+      return;
+    }
     if (!kTitle.trim() || !kContent.trim()) return;
     setSavingKnowledge(true);
     try {
@@ -556,6 +623,10 @@ export default function AdminPortalPage() {
   };
 
   const handleDeleteKnowledge = async (id: string) => {
+    if (adminUser?.role === 'demo') {
+      showToast('Chế độ Sandbox: Bạn chỉ có quyền xem, không thể xóa tài liệu tri thức.');
+      return;
+    }
     if (!confirm('Bạn có chắc muốn xóa tài liệu này khỏi kho tri thức?')) return;
     try {
       await api(`/api/admin/knowledge/${id}`, {
@@ -749,6 +820,31 @@ export default function AdminPortalPage() {
             </button>
           </form>
 
+          {/* HỘP TRUY CẬP NHANH DEMO SANDBOX */}
+          <div className="admin-demo-box">
+            <div className="admin-demo-badge">
+              <Eye size={12} />
+              <span>TRẢI NGHIỆM DEMO SANDBOX</span>
+            </div>
+            <p className="admin-demo-desc">
+              Dành cho khách tham quan và nghiệm thu: Xem toàn bộ dữ liệu, doanh thu, đơn hàng và kho tri thức AI với cơ chế cách ly an toàn 100%.
+            </p>
+            <button
+              type="button"
+              className="admin-demo-btn"
+              onClick={handleDemoLogin}
+              disabled={loginSubmitting}
+            >
+              <Eye size={16} />
+              <span>TRUY CẬP NHANH DEMO (CHỈ XEM)</span>
+            </button>
+            <div className="admin-demo-creds">
+              <span>Tài khoản: <strong>demo</strong></span>
+              <span>•</span>
+              <span>Mật khẩu: <strong>DemoAdmin@2026</strong></span>
+            </div>
+          </div>
+
           <div style={{ marginTop: '24px', textAlign: 'center' }}>
             <Link
               href="/"
@@ -893,7 +989,7 @@ export default function AdminPortalPage() {
                   {adminUser?.full_name || 'Quản Trị Viên'}
                 </strong>
                 <span style={{ fontSize: '11px', color: '#64748b' }}>
-                  {adminUser?.role === 'superadmin' ? 'Quản trị viên cấp cao' : 'Nhân viên'}
+                  {adminUser?.role === 'superadmin' ? 'Quản trị viên cấp cao' : adminUser?.role === 'demo' ? 'Demo Sandbox (Chỉ xem)' : 'Nhân viên'}
                 </span>
               </div>
             </div>
@@ -957,6 +1053,23 @@ export default function AdminPortalPage() {
 
           {/* Content Canvas */}
           <div className="admin-content">
+            {/* BANNER CẢNH BÁO CHẾ ĐỘ DEMO SANDBOX (READ-ONLY) */}
+            {adminUser?.role === 'demo' && (
+              <div className="admin-sandbox-alert">
+                <div className="admin-sandbox-alert-header">
+                  <span className="admin-sandbox-badge">
+                    <Eye size={12} />
+                    DEMO SANDBOX (CHỈ XEM)
+                  </span>
+                  <span className="admin-sandbox-sub">
+                    Cơ chế cách ly quyền dữ liệu đang hoạt động
+                  </span>
+                </div>
+                <p className="admin-sandbox-desc">
+                  Bạn đang truy cập hệ thống với tư cách <strong>Khách tham quan / Nghiệm thu</strong>. Toàn bộ tính năng xem số liệu kinh doanh, đơn hàng, sản phẩm và kho tri thức RAG đều sẵn sàng. Mọi thao tác <strong>Thêm mới, Cập nhật trạng thái hoặc Xóa dữ liệu</strong> đã được cách ly an toàn ở cả giao diện và Backend API.
+                </p>
+              </div>
+            )}
             {/* ==========================================================
                 TAB 1: TỔNG QUAN (OVERVIEW)
                ========================================================== */}

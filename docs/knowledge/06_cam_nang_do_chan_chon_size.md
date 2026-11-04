@@ -51,3 +51,4 @@ Dưới đây là bảng đối chiếu tiêu chuẩn giữa chiều dài bàn c
 
 3. **Dành Cho Giày Sneaker Thời Trang Dạo Phố (Lifestyle):**
    - Chọn đúng cỡ chuẩn (True to size) theo bảng quy đổi. Nếu đi kèm tất dày phong cách cổ cao, có thể nhích nhẹ 0.5 size.
+

@@ -40,3 +40,4 @@ Trước khi nhập kho và đưa lên hệ thống, từng kiện hàng phải 
 - **Lớp 1 - Kiểm Định Hồ Sơ & Nguồn Gốc:** Đối soát chứng từ nhập khẩu, hóa đơn VAT, vận đơn hải quan và ủy quyền đại lý chính thức từ hãng.
 - **Lớp 2 - Kiểm Định Vật Lý Chuyên Sâu:** Đánh giá chất lượng chất liệu da, độ đàn hồi của các công nghệ bọt đệm độc quyền (ZoomX, Light Boost, FF BLAST+ ECO, BOOM PEBA, NitroEdge), kiểm tra độ cong đĩa đệm Carbon, đường chỉ may kỹ thuật và phản quang 3M dưới đèn chuyên dụng.
 - **Lớp 3 - Đối Chiếu Cơ Sở Dữ Liệu Toàn Cầu:** Quét mã vạch UPC/EAN và mã sản phẩm (SKU/Art Number) đối chiếu trực tiếp trên hệ thống cơ sở dữ liệu quốc tế của từng thương hiệu sản xuất.
+

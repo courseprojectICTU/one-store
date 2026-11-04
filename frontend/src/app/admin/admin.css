@@ -599,3 +599,129 @@
 .admin-chart-bar:hover {
   opacity: 0.8;
 }
+
+
+/* ==========================================================================
+   DEMO SANDBOX (READ-ONLY) STYLES
+   Cơ chế cách ly quyền dữ liệu và trải nghiệm khách tham quan
+   ========================================================================== */
+
+.admin-demo-box {
+  margin-top: 24px;
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.admin-demo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.admin-demo-desc {
+  font-size: 12px;
+  color: #64748b;
+  margin: 10px 0 14px;
+  line-height: 1.5;
+}
+
+.admin-demo-btn {
+  width: 100%;
+  padding: 11px 16px;
+  background: #f59e0b;
+  color: #ffffff;
+  border: 1px solid #d97706;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(245, 158, 11, 0.2);
+}
+
+.admin-demo-btn:hover:not(:disabled) {
+  background: #d97706;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3);
+}
+
+.admin-demo-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-demo-creds {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.admin-demo-creds strong {
+  color: #0f172a;
+}
+
+/* === SANDBOX ALERT BANNER TRONG ADMIN DASHBOARD === */
+.admin-sandbox-alert {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-left: 4px solid #f59e0b;
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.08);
+}
+
+.admin-sandbox-alert-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.admin-sandbox-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  background: #f59e0b;
+  color: #ffffff;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-sandbox-sub {
+  font-size: 12px;
+  font-weight: 700;
+  color: #b45309;
+}
+
+.admin-sandbox-desc {
+  font-size: 13px;
+  color: #78350f;
+  margin: 0;
+  line-height: 1.5;
+}

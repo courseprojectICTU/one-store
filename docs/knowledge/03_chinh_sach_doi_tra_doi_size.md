@@ -44,3 +44,4 @@ Khách hàng không cần phải tự mang hàng ra bưu điện:
 - **Bước 1 - Đăng Ký Đổi Size:** Nhắn tin trực tiếp cho Chatbot "Tư vấn One" trên website hoặc liên hệ Hotline 0900-ONE-STORE, cung cấp mã đơn và size giày mong muốn đổi.
 - **Bước 2 - Bưu Tá Đến Thu Hồi Kiện Hàng:** Bạn đóng gói giày cẩn thận vào hộp nguyên bản. Nhân viên bưu tá đối tác của One - Store sẽ đến tận địa chỉ nhà bạn để tiếp nhận kiện hàng đổi.
 - **Bước 3 - Nhận Đôi Giày Mới:** Ngay khi tiếp nhận thông tin thu hồi, kho vận One - Store sẽ tiến hành xuất kho và giao đôi giày cỡ mới đến tận tay bạn trong vòng **24 – 48 giờ**.
+
