@@ -14,3 +14,4 @@ VALUES (
   'demo',
   1
 );
+
