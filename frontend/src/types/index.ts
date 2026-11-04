@@ -88,9 +88,43 @@ export type KnowledgeDoc = {
   chunk_count?: number;
 };
 
+export type CreatedOrderInfo = {
+  code: string;
+  total: number;
+  discount: number;
+  shippingFee: number;
+  customer_name: string;
+  phone: string;
+  address: string;
+  product_name: string;
+  size: string;
+  color: string;
+  quantity: number;
+};
+
+export type PendingOrderInfo = {
+  productId: number;
+  productName: string;
+  size: string;
+  color: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+  discount: number;
+  shippingFee: number;
+  total: number;
+  customerName: string;
+  phone: string;
+  address: string;
+};
+
 export type ChatMessage = {
   id: string;
   role: 'user' | 'assistant';
   text: string;
-  sources?: Array<{ title?: string; text?: string; score?: number }>;
+  sources?: Array<string | { title?: string; text?: string; score?: number }>;
+  products?: Product[];
+  readyToConfirm?: boolean;
+  createdOrder?: CreatedOrderInfo;
+  pendingOrder?: PendingOrderInfo;
 };

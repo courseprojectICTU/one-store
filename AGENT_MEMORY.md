@@ -921,6 +921,160 @@ Dự án đã trải qua hành trình nâng cấp toàn diện qua 27 cột mố
 
 ---
 
+   38. **Xây Dựng Hoàn Chỉnh Chatbot AI RAG 'Tư Vấn One' Qua 4 Bước Chuẩn Doanh Nghiệp**:
+       - **Bước 1: Chuẩn Bị Tri Thức & Smart Chunking**:
+         * Tạo migration backend/migrations/0010_seed_store_policies_knowledge.sql nạp 7 nhóm tài liệu (6 chính sách bán hàng + 1 đặc tả 70 mẫu sneaker 10 thương hiệu Âu - Á) gồm 17 chunks vào CSDL D1.
+         * Viết hàm splitIntoChunks(text, 1100, 140) ngắt thông minh tại ranh giới xuống dòng bảo toàn ngữ cảnh liền mạch.
+       - **Bước 2: Vector Hóa & Indexing Cloudflare Vectorize**:
+         * Viết hàm embed(c, texts) dùng @cf/baai/bge-m3 sinh vector 1024 chiều theo batch.
+         * Xây dựng API POST /api/admin/knowledge (kèm cơ chế tự động rollback D1 khi Vectorize lỗi) và DELETE /api/admin/knowledge/:id.
+         * Đồng bộ 100% 31 chunks tri thức vào Cloudflare Vectorize ba-khi-knowledge.
+       - **Bước 3: Pipeline RAG Backend (Retrieval + Generation)**:
+         * Xây dựng API POST /api/chat nhận câu hỏi, vector hóa, truy vấn Vectorize lấy Top-5 chunks, ghép 20 mẫu sneaker nổi bật và System Prompt chuyên gia tư vấn One.
+         * Sử dụng LLM @cf/google/gemma-4-26b-a4b-it (temperature: 0.2, max_tokens: 1200) kèm cơ chế bóc tách reasoning nội tâm.
+       - **Bước 4: Tích Hợp UI ChatbotWidget & Kiểm Thử Toàn Diện**:
+         * Tạo frontend/src/components/ChatbotWidget.tsx chuẩn Bred Aesthetic (#0a0a0a & #e11d48, bo góc 20px, nút MessageSquare/X, hiển thị logo One, trạng thái online, sources badges chip, quick prompts).
+         * Tích hợp vào frontend/src/components/Providers.tsx, biên dịch thành công Next.js 16 export ra frontend/out/.
+         * Kiểm thử nghiệm thu 3 test cases: Tư vấn chân bè (Asics 2E/Mizuno/tăng 0.5-1 size), Freeship từ 3 đôi & quyền xỏ thử đồng kiểm, và Chống ảo giác (từ chối bán nồi cơm điện/áo thun).
+
+
+   39. **Kế Hoạch Tối Ưu Hóa Bộ Lọc Giá & Lịch Sử Hội Thoại Đa Lượt (Lộ Trình Phiên Tiếp Theo)**:
+       - **Bối cảnh & Phản hồi thực nghiệm từ người dùng**:
+         * *Trường hợp 1 (Lọc giá)*: Khách hỏi 'Hãy liệt kê cho tôi những đôi giày có giá dưới 2 triệu', mô hình LLM Gemma tự nhẩm thủ công từng sản phẩm ('* Anta C202... (No)', '* Puma Suede... (YES)') dẫn đến cạn sạch 1200 tokens và bị cắt cụt câu trả lời.
+         * *Trường hợp 2 (Lộ nháp kiểm tra)*: Khách hỏi tư vấn chân to màu đỏ chạy bộ, câu trả lời tốt nhưng bị lộ checklist tự chấm điểm ở đuôi ('* Short, polite? Yes... *Self-Correction during drafting').
+         * *Trường hợp 3 (Mất ngữ cảnh)*: Khách hỏi tiếp 'vẫn tiêu chí trên nhưng tôi muốn giá giao động trong khoảng 2 - 3 triệu', bot mất ngữ cảnh màu đỏ và chạy bộ do API hiện tại chỉ nhận câu hỏi đơn lẻ (Stateless).
+       - **Bản kế hoạch giải pháp 3 trụ cột đã được thống nhất**:
+         1. **Trụ cột 1 - Hybrid Search & SQL Attribute Filter**:
+            - Bổ sung hàm bóc tách ý định & thực thể (Rule-based / Regex Parser) trước khi vào LLM:
+              + Trích xuất khoảng giá: 'dưới 2 triệu' -> `price <= 2000000`, 'từ 2 đến 3 triệu' -> `price BETWEEN 2000000 AND 3000000`.
+              + Trích xuất phân loại & màu sắc: 'chạy bộ' -> `category = 'Running'`, 'màu đỏ' -> `colors LIKE '%đỏ%' OR colors LIKE '%cam%'`.
+            - Truy vấn trực tiếp bảng `products` trong CSDL D1 lấy đúng 3 - 5 sản phẩm khớp 100% tiêu chí để nạp vào Prompt. LLM không còn phải đọc 70 sản phẩm để tính nhẩm, phản hồi tức thì và chính xác tuyệt đối.
+         2. **Trụ cột 2 - Output Sanitizer & Triệt Tiêu Bản Nháp (CoT)**:
+            - Viết hàm `cleanModelOutput(text)` bằng Regex loại bỏ triệt để:
+              + Các dòng nhẩm so sánh: `* Model: Price (No/YES)`.
+              + Các dòng tự chấm rubric: `* Tone: ...`, `* Constraints: ...`, `* Direct answer? Yes`.
+              + Khối nháp tự sửa `*Self-Correction during drafting...`.
+         3. **Trụ cột 3 - Multi-turn Conversation History**:
+            - Nâng cấp API `POST /api/chat` nhận thêm mảng `history: Array<{ role: 'user' | 'assistant', text: string }>` (lưu 4 - 6 lượt chat gần nhất từ `ChatbotWidget.tsx`).
+            - Cho phép bot kế thừa tiêu chí ở các câu hỏi liên đới ('vẫn tiêu chí trên', 'đôi đầu tiên có size 42 không?').
+
+---
+
+   40. **Triển Khai Hoàn Tất Gói Tối Ưu Hóa 3 Trụ Cột Cho Chatbot AI RAG 'Tư Vấn One'**:
+       - **Trụ cột 1 (Hybrid Search & SQL Attribute Filter)**:
+         * Xây dựng hàm `extractProductFilters(query, history)` bóc tách khoảng giá (`minPrice`, `maxPrice`), phân loại (`category: Running | Lifestyle | Basketball | Outdoor`), màu sắc (`color` qua Unicode regex tiếng Việt), thương hiệu (`brand`), và cờ nhận diện câu hỏi nối tiếp (`isFollowUp`).
+         * Tự động lọc SQL parameterized query trực tiếp trên CSDL D1 `products` (`price >= ? AND price <= ? AND category = ? ... LIMIT 10`), loại bỏ triệt để hiện tượng đưa 70 mẫu thô khiến LLM tự nhẩm `(No)/(YES)` cạn tokens.
+         * Cơ chế tinh lọc ngữ cảnh thông minh: Khi đã có SQL filter cụ thể, tự động loại bỏ chunk danh mục 70 mẫu tổng khỏi `knowledgeContext` của Vectorize để tiết kiệm >2000 prompt tokens và ngăn chặn mô hình nhẩm Keep/Skip.
+       - **Trụ cột 2 (Output Sanitizer & Trích Xuất Reasoning Hoàn Hảo)**:
+         * Phát hiện & xử lý nguyên nhân gốc rễ: Workers AI Gemma 4 sinh toàn bộ quá trình suy nghĩ và bản thảo câu trả lời tiếng Việt vào `reasoning_content` (chiếm 1600+ tokens) khiến `content` bị cắt cụt do chạm trần `finish_reason: "length"`.
+         * Xây dựng hàm `extractAnswerFromReasoning(reasoning)` tự động cứu vớt bản thảo câu trả lời tiếng Việt hoàn chỉnh từ `reasoning_content` khi `finish_reason === 'length'` hoặc `content.length < 150`.
+         * Nâng cấp hàm `cleanModelOutput(text)`: Triệt tiêu 100% các dòng checklist rubric, self-correction, so sánh Keep/Skip, nhãn tiếng Anh (`* Final Plan:*`, `* Recommendation:*`), và các dấu ngoặc kép rải rác.
+       - **Trụ cột 3 (Multi-turn Conversation History)**:
+         * Mở rộng `chatRequestSchema`: Chấp nhận `history: Array<{ role, text }>` với độ dài mỗi lượt `text: z.string().max(5000)`.
+         * Cập nhật `ChatbotWidget.tsx` phía client: Tự động trích xuất 6 lượt tin nhắn gần nhất (`recentHistory.slice(-6)` với `text.slice(0, 2000)`) và gửi kèm payload `POST /api/chat`.
+         * Làm sạch `history` bằng `cleanModelOutput` trước khi nạp vào `conversationMessages` của Google Gemma 4 nhằm chống hiện tượng lây nhiễm CoT / markdown bullet tiếng Anh (few-shot bias).
+       - **Kết Quả Nghiệm Thu Thực Tế (100% Đạt Chuẩn)**:
+         * *Kịch bản 1 ("giá dưới 2 triệu")*: Trả lời chính xác 2 mẫu `Anta Walker Retro Casual` (1.890.000₫) và `Puma Suede Classic XXI` (1.990.000₫), sạch 100% không còn nhẩm No/YES.
+         * *Kịch bản 2 ("chân 45cm màu đỏ chạy bộ")*: Tư vấn khéo léo 45cm vs Size 45, hướng dẫn 3 bước đo chân, gợi ý chuẩn `Adidas Ultraboost Light` (4.190.000₫, màu Trắng Phối Đỏ Cam, có sẵn size 45) và `Li-Ning Shadow 2 Double Carbon`.
+         * *Kịch bản 3 ("vẫn tiêu chí trên nhưng giá 2 - 3 triệu")*: Giữ nguyên ngữ cảnh chạy bộ và màu đỏ, gợi ý chính xác `Anta Mach 4 Speed Training` (2.490.000₫, màu Đen Đỏ) và `Li-Ning Rouge Rabbit 7 Pro` (2.190.000₫), nhắc nhở tinh tế về size và chính sách đồng kiểm tận nơi.
+       - **Cải Tiến Bổ Sung - Trình Dựng Markdown Nội Bộ Zero-Dependencies Cho ChatbotWidget**:
+         * *Vấn đề*: Frontend trước đây hiển thị `{m.text}` thô kèm `whiteSpace: 'pre-line'`, khiến các ký tự định dạng Markdown như `**Size 39 EUR**`, `**Đồng kiểm tận nơi**` bị lộ nguyên dấu hoa thị `**`.
+         * *Khắc phục triệt để*: Xây dựng component `FormattedChatContent` an toàn XSS (không dùng `dangerouslySetInnerHTML`), tự động chuyển đổi `**text**` thành `<strong>` in đậm rõ nét, danh sách số (`1. `, `2. `) có số thứ tự đỏ thể thao `#e11d48` nổi bật, căn lề và thụt dòng chuẩn mực. Biên dịch tĩnh hoàn tất qua `npm run build:frontend`.
+
+   41. **Tích Hợp Khung Thẻ Sản Phẩm Gợi Ý Tương Tác Trực Tiếp (Interactive Mini Product Cards) & Hoàn Thiện Định Dạng Markdown**:
+       - **Bối cảnh & Yêu cầu**:
+         * Khi khách hàng hỏi tư vấn giày thể thao, ngoài lời văn tư vấn bằng văn bản, khách hàng cần nhìn thấy ngay các thẻ sản phẩm thu nhỏ trực quan (ảnh sneaker studio, tên mẫu giày, giá tiền nổi bật, danh mục) ngay bên dưới tin nhắn trả lời của bot.
+         * Khách hàng có thể bấm trực tiếp vào bất kỳ khung thẻ sản phẩm nào để mở tức thì Modal xem chi tiết sản phẩm (`ProductDetailModal`) nhằm chọn size, chọn màu và đặt mua hàng nhanh chóng mà không cần tìm kiếm thủ công.
+       - **Triển khai chi tiết**:
+         * **Backend Trích Xuất Sản Phẩm Gợi Ý (`backend/src/chatbot.ts`)**:
+           - Mở rộng câu lệnh truy vấn sản phẩm để lấy đầy đủ các trường: `id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at`.
+           - So khớp thông minh: Lọc danh sách `suggestedProducts` dựa trên tên sản phẩm đầy đủ hoặc cụm từ khóa mô hình (`modelWords`) được nhắc tới trong lời văn của AI; hoặc fallback 3-4 mẫu khớp bộ lọc SQL.
+           - Chuẩn hóa trường `sizes` và `colors` thành mảng JSON, sinh đường dẫn ảnh `/api/images/...`, trả về mảng `products: [...]` cùng `answer` và `sources` trong endpoint `POST /api/chat`.
+         * **Frontend Thẻ Sản Phẩm Tương Tác (`frontend/src/components/ChatbotWidget.tsx`)**:
+           - Mở rộng kiểu dữ liệu `ChatMessage` với trường tùy chọn `products?: Product[]` trong `frontend/src/types/index.ts`.
+           - Tích hợp khối hiển thị thẻ sản phẩm bên dưới nội dung chat: Mỗi thẻ có ảnh vuông `imageOf(prod)`, tên giày, giá đỏ `#e11d48`, tag danh mục và nút `Xem` kèm icon `ChevronRight`.
+           - Bắt sự kiện `onClick`: Gọi `setSelectedProduct(prod); setActiveModal('detail')` từ `ShopContext`, kích hoạt `ProductDetailModal` hiển thị lập tức với đầy đủ ảnh to, cẩm nang chọn size và nút MUA NGAY.
+         * **Hoàn Thiện Bộ Dựng Markdown Phía Client**:
+           - Xử lý triệt để ký tự gạch đầu dòng lồng nhau (`- *`, `* *`, `• *`) và dấu hoa thị đơn lẻ ở đầu câu trả lời, đảm bảo nội dung hiển thị phân cấp chuyên nghiệp, chữ in đậm sắc nét và không bao giờ lộ ký tự thô.
+         * **Đóng Gói & Xuất Bản**:
+           - `npm run typecheck` đạt 0 lỗi TypeScript.
+           - `npm run build:frontend` xuất bản thành công bản tĩnh ra `frontend/out/`.
+
+   42. **Khắc Phục Triệt Để Ký Tự Đặc Biệt Markdown (**, :**, Bullet Kép) & Chuẩn Hóa Danh Sách Số Trực Quan Trong Chatbot AI**:
+       - **Bối cảnh & Phát hiện nguyên nhân gốc rễ**:
+         * Khi khách hỏi tư vấn chân bè, câu trả lời của bot bị hiển thị các ký tự thô: `1. Ưu tiên các thương hiệu Châu Á:...**`, `Asics Gel-Nimbus 26 PureGEL:...**` và bị double bullet (`•` rồi tới `1. `).
+         * *Nguyên nhân Backend*: Regex cũ `/(?:^|\n)\s*[-*•]\s*[-*•]\s*/g` và `[A-Za-z0-9/ ]+` trong `cleanModelOutput` đã vô tình xóa mất dấu mở `**` của tên sản phẩm, chỉ để lại dấu đóng `:**` ở cuối dòng.
+         * *Nguyên nhân Frontend*: `FormattedChatContent` trước đây chỉ tách `**...**` hoàn chỉnh, nếu có token mồ côi hoặc thiếu mở `**`, nó render nguyên vẹn chuỗi `:**` và dấu hoa thị ra màn hình; đồng thời các dòng `- 1. ` bị coi là bullet thay vì danh sách số.
+       - **Khắc phục toàn diện & triệt để**:
+         * **Backend (`backend/src/chatbot.ts`)**:
+           - Sửa regex chuẩn hóa bullet: `/(?:^|\n)\s*[-*•]\s+[-*•]\s+(?!\*)/g` bảo vệ nguyên vẹn dấu mở `**`.
+           - Giới hạn regex lọc dàn ý chỉ khớp nhãn kỹ thuật tiếng Anh thực tế (`Final Plan|Recommendation|Draft|Step \d+|...`), không bao giờ can thiệp vào tên thương hiệu sneaker hay tiếng Việt.
+           - Bổ sung cơ chế tự sửa chữa (Self-Healing): Tự động phát hiện và khôi phục dấu mở `**` nếu dòng có cấu trúc `Tên sản phẩm:**`.
+         * **Frontend (`frontend/src/components/ChatbotWidget.tsx`)**:
+           - Cơ chế chuẩn hóa đa tầng trước khi render:
+             1. Khử lỗi double bullet: `- 1. ` -> `1. `.
+             2. Chuẩn hóa `**1. Tiêu đề:**` -> `1. **Tiêu đề:**` giúp số thứ tự `1.` được tô đỏ nổi bật, tiêu đề in đậm hoàn hảo.
+             3. Khôi phục tự động dấu `**` bị thiếu trước dấu hai chấm `:**`.
+             4. **Nghiêm cấm ký tự đặc biệt rò rỉ**: Trong `parseInline`, mọi token không phải khối Markdown hợp lệ đều được làm sạch triệt để `token.replace(/[*_#~`]/g, '')`, đảm bảo không bao giờ còn sót bất kỳ dấu hoa thị hay ký tự rác nào trên màn hình.
+         * **Kiểm Thử & Xuất Bản**:
+           - `npm run typecheck` đạt 0 lỗi TypeScript.
+           - `npm run build:frontend` xuất bản thành công bản tĩnh ra `frontend/out/`.
+           - Kiểm thử thực tế câu hỏi chân bè: 100% văn bản sạch bóng ký tự thô, hiển thị danh sách số và thẻ sản phẩm tương tác hoàn mỹ.
+
+   43. **Tối Ưu Hóa Multi-Turn Context Window & Cơ Chế Chịu Lỗi Tự Động (Resilience), Triệt Tiêu Hoàn Toàn Lỗi Outline Tiếng Anh & Lỗi 500**:
+       - **Bối cảnh & Phát hiện nguyên nhân gốc rễ**:
+         1. *Lỗi hệ thống 500*: Khi embedding Workers AI (`bge-m3`) gặp sự cố mạng chập chờn, API ném exception và fail 500, sau đó thông báo lỗi bị lưu vào lịch sử hội thoại và tái truyền vào LLM làm ô nhiễm ngữ cảnh các lượt sau.
+         2. *Phình to Context Window*: Càng chat nhiều lượt, hệ thống nhồi nhét 4 lượt lịch sử dài + 10 sản phẩm mô tả đầy đủ + 5 chunks chính sách (>4500 tokens), khiến Google Gemma 4 bị quá tải ngữ cảnh (Attention Degradation) và sinh dàn ý tiếng Anh (`Direct answer`, `Proactive suggestion`, `Detail 1`, `Closing`) thay vì viết văn xuôi hoàn chỉnh.
+         3. *Gợi ý mâu thuẫn khi lọc giá*: Khi khách hỏi ngân sách < 1 triệu, hệ thống nói shop không có nhưng fallback lấy 3 đôi 4-5 triệu hiển thị dưới card.
+       - **Khắc phục toàn diện & triệt để**:
+         * **Cơ chế chịu lỗi tự động (Resilient Fallback)**: Bọc try/catch cho `embed(c, [question])`, nếu embedding lỗi thì ghi nhận warning và tự động chuyển chế độ fallback trực tiếp không crash 500.
+         * **Tối ưu hóa Context Window**:
+           - Rút gọn mô tả sản phẩm `p.description.split('.')[0] + '.'`, giảm 70% token dữ liệu sản phẩm.
+           - Giới hạn lịch sử hội thoại: Chỉ giữ 3 lượt gần nhất, cắt ngắn 450 ký tự mỗi lượt và lọc sạch các tin nhắn lỗi hệ thống.
+           - Lọc thông minh tri thức: Chỉ nạp trích đoạn chính sách khi khách thực sự hỏi về đổi trả/bảo hành/freeship/size.
+         * **Chống mâu thuẫn giá sàn**: Khi khách hỏi giá thấp hơn sàn kho hàng, tự động tìm 3 mẫu có giá thấp nhất cửa hàng (Anta Walker 1.890.000₫, Puma Suede 1.990.000₫) để tư vấn trung thực.
+         * **Làm sạch Outline & Checklist**: Loại bỏ triệt để các nhãn lập dàn ý tiếng Anh và checklist rubric ở đuôi (`Polite, friendly, concise`, `No English headers`, `Only use provided data`).
+         * **Kiểm Thử & Xuất Bản**:
+           - `npm run typecheck` đạt 0 lỗi TypeScript.
+           - `npm run build:frontend` xuất bản thành công bản tĩnh ra `frontend/out/`.
+           - Kiểm thử thực tế chuỗi 4 lượt chat: Lượt 1 (dưới 1 triệu tư vấn chuẩn giá sàn 1.89m), Lượt 2 (hướng dẫn đặt hàng 4 bước không bị 500), Lượt 4 (hỏi tiếp màu đỏ chạy bộ trả lời mượt mà tự nhiên, 0 ký tự rác).
+
+    44. **Triển Khai Hoàn Tất Tính Năng Chốt Đơn Tự Động Ngay Trong Chatbot (Agentic In-Chat Ordering) Ghi Thật Vào CSDL D1 & Đồng Bộ Tra Cứu Đơn Hàng**:
+        - **Bối cảnh & Yêu cầu**:
+          * Người dùng chính thức phê duyệt thiết kế quy trình 4 bước chốt đơn tự động (In-Chat Ordering) ngay trong Chatbot AI 'Tư vấn One'.
+          * Yêu cầu đơn hàng không được sinh mã giả lập hay dừng ở mức minh họa, mà phải được thẩm định kho thực tế và thực thi ghi giao dịch thật vào CSDL Cloudflare D1 (`orders`, `order_items`, trừ `stock`, tăng lượt dùng voucher `ONE10`), cho phép khách tra cứu ngay trên `/orders`.
+        - **Triển khai chi tiết**:
+          * **Trụ Cột 1: Gom Thông Tin Đơn Hàng 1 Bước (`backend/src/chatbot.ts`)**:
+            - Xây dựng hàm `extractOrderDetails(query, history, pendingOrder, allProducts)` bóc tách toàn diện ý định mua hàng (`isOrderIntent`), ý định chốt đơn (`isConfirmIntent`), ý định hủy (`isCancelIntent`), cùng các thực thể: `product` (so khớp điểm trọng số theo ngữ cảnh mới nhất và lượt nói của khách), `size`, `color`, `quantity`, `customerName`, `phone`, `address`.
+            - Khi khách bày tỏ ý định mua nhưng chưa đủ dữ liệu: Bot phản hồi 1 lần duy nhất biểu mẫu gom thông tin ngắn gọn, tự động điền trước các thông tin đã thống nhất ở lượt trước (như size 39, tên mẫu giày) và liệt kê các phối màu thực tế của mẫu đó.
+          * **Trụ Cột 2: Thẩm Định Kho Hàng & Thông Số Trên CSDL D1 (Inventory Validation)**:
+            - Kiểm tra thời gian thực trên CSDL D1: Sản phẩm có tồn tại và còn đủ số lượng không (`stock >= quantity`), cỡ giày khách chọn có trong mảng JSON `sizes` không, màu sắc có khớp mảng JSON `colors` không, SĐT có đúng 10 chữ số không, địa chỉ có chi tiết không.
+            - Nếu thông số chưa hợp lệ (ví dụ: chọn size 46 trong khi mẫu chỉ có 39-44): Báo lỗi lịch sự và liệt kê các size/màu thực tế đang có sẵn trong kho, ngăn chặn 100% tình trạng ảo giác tồn kho.
+          * **Trụ Cột 3: Bảng Tóm Tắt & Nút Bấm Chốt Đơn Nhanh UI**:
+            - Khi thông tin đã hợp lệ: Tính toán đơn giá, tạm tính, tự động áp dụng ưu đãi voucher thành viên `ONE10` (giảm 10%), phí vận chuyển (0đ nếu >= 3 đôi hoặc >= 5 triệu, ngược lại 30.000đ), tính tổng COD.
+            - Xuất Bảng tóm tắt đơn hàng chuẩn mực, gửi kèm cờ `readyToConfirm: true` và payload `pendingOrder`.
+            - Phía frontend (`ChatbotWidget.tsx`): Hiển thị nút bấm nhanh màu đỏ thể thao `[Chốt đơn ngay]` (có icon `CheckCircle2`, hiệu ứng hover) để khách bấm trực tiếp mà không cần gõ chữ.
+          * **Trụ Cột 4: Thực Thi Giao Dịch Thật Vào CSDL Cloudflare D1 (Real D1 Transaction)**:
+            - Khi khách nhắn `"Chốt đơn"` (hoặc bấm nút): Thực thi `c.env.DB.batch(...)` nguyên tử:
+              1. Trừ tồn kho: `UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?`.
+              2. Tạo đơn hàng: `INSERT INTO orders (code, customer_name, phone, address, note, total, voucher_code, discount, created_at)`. Mã đơn sinh chuẩn `ONE-` + 8 ký tự hex ngẫu nhiên, ghi chú `[Đặt qua AI Chatbot One] [Hình thức: COD - Đồng kiểm xỏ thử]`.
+              3. Tạo chi tiết đơn hàng: `INSERT INTO order_items (order_id, product_id, product_name, size, color, quantity, unit_price)`.
+              4. Cập nhật voucher: `UPDATE vouchers SET used_count = used_count + 1 WHERE code = 'ONE10'`.
+              5. Xóa cache danh sách sản phẩm: `CACHE.delete('products:v1')`.
+            - Trả về mã đơn thật và khối dữ liệu `createdOrder`.
+          * **Trụ Cột 5: Giao Diện Thẻ Xác Nhận VIP & Đồng Bộ Lịch Sử Mua Hàng**:
+            - Trên UI ChatbotWidget: Hiển thị Thẻ xác nhận đơn hàng VIP màu xanh lá nhạt sang trọng (`ĐÃ LƯU VÀO HỆ THỐNG D1`), hiển thị mã đơn, nút sao chép mã đơn (`Copy`/`Check`), tóm tắt sản phẩm, và nút bấm `[Tra cứu đơn hàng]` điều hướng tức thì tới `/orders?code=ONE-XXXXXX`.
+            - Tự động gọi `addRecentOrder(orderCode)` lưu vào thiết bị nếu khách đã đồng ý Cookie.
+            - Tuân thủ nghiêm ngặt quy chuẩn Zero-Emoji (100% icon bằng `lucide-react`).
+        - **Kết Quả Nghiệm Thu**:
+          * `npm run typecheck` đạt 0 lỗi TypeScript toàn dự án.
+          * `npm run build:frontend` xuất bản thành công 100% bản tĩnh ra `frontend/out/`.
+          * Chạy script `run_acceptance_test.mjs`: Vượt qua 100% 5 bài test chấp nhận (Gom thông tin 1 bước, Từ chối size 46 không có sẵn, Xuất bảng tóm tắt kèm nút bấm, Ghi thật vào CSDL D1 thành công, Tra cứu qua API `/api/orders/lookup` trả về đúng 100% đơn hàng và sản phẩm trong CSDL D1).
+
+
+
+---
+
 ## 3. CẤU TRÚC THƯ MỤC DỰ ÁN HIỆN TẠI
 
 ```text
@@ -1021,7 +1175,8 @@ one-store/
 | `backend/migrations/0006_...` | Created | Migration nạp mã giảm giá mặc định `ONE10` và `ONE50`. |
 | `backend/src/index.ts` | Modified | API `/api/health` trả về `service: "one-store"`, tiền tố mã đơn `ONE-`. |
 | `backend/src/commerce.ts` | Modified | Hỗ trợ regex tra cứu đơn hàng linh hoạt `ONE-`, `VL-`, `BK-`. |
-| `backend/src/chatbot.ts` | Modified | Tối ưu prompt AI `Tư vấn One`, nâng `max_tokens: 1200`, bóc tách reasoning. |
+| `backend/src/chatbot.ts` | Modified | Gói tối ưu 3 trụ cột: Hybrid Search SQL Filter, Output Sanitizer trích xuất Reasoning, Multi-turn History, max_tokens: 2048. |
+| `frontend/src/components/ChatbotWidget.tsx` | Modified | Gửi kèm recentHistory (tối đa 6 lượt tin nhắn gần nhất) lên API POST /api/chat. |
 | `frontend/src/constants/theme.ts` | Created | SSOT cho màu sắc (Trắng/Đỏ/Đen/Xám), fonts (Outfit/Plus Jakarta Sans), shadows, radii. |
 | `frontend/src/constants/strings.ts`| Created | SSOT cho 100% văn bản giao diện tiếng Việt và tiếng Anh dự phòng. |
 | `frontend/src/app/globals.css` | Modified | Cập nhật biến màu, font Outfit, thẻ nổi (card-based), tỷ lệ line-height 1.25. |

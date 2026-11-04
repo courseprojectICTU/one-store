@@ -9,6 +9,7 @@ import CartDrawer from '@/components/CartDrawer';
 import CookieConsentBanner from '@/components/CookieConsentBanner';
 import WishlistModal from '@/components/WishlistModal';
 import StickyMobileBar from '@/components/StickyMobileBar';
+import ChatbotWidget from '@/components/ChatbotWidget';
 import Toast from '@/components/Toast';
 
 function AppShell({ children }: { children: React.ReactNode }) {
@@ -30,6 +31,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <StickyMobileBar />
       <CookieConsentBanner />
       <Toast />
+      <ChatbotWidget />
     </>
   );
 }

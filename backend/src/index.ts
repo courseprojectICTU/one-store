@@ -1,6 +1,7 @@
 import { commerce, type ShopBindings } from './commerce';
 
 import { adminRouter, getAdminUser } from './admin';
+import { chatbot } from './chatbot';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { z } from 'zod';
@@ -389,6 +390,7 @@ app.patch('/api/admin/orders/:id', async (c) => {
 app.route('/api', commerce);
 
 app.route('/api', adminRouter);
+app.route('/api', chatbot);
 app.onError((e, c) => {
   console.error(e);
   return c.json({ error: 'Lỗi máy chủ' }, 500);
