@@ -370,14 +370,18 @@ export default function ChatbotWidget() {
               );
             },
             onOrderReady: (data) => {
-              setPendingOrder(data.pendingOrder);
+              if (data?.readyToConfirm && data?.pendingOrder) {
+                setPendingOrder(data.pendingOrder);
+              } else {
+                setPendingOrder(null);
+              }
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === replyMsgId
                     ? {
                         ...m,
-                        readyToConfirm: data.readyToConfirm,
-                        pendingOrder: data.pendingOrder,
+                        readyToConfirm: Boolean(data?.readyToConfirm),
+                        pendingOrder: data?.pendingOrder || undefined,
                       }
                     : m,
                 ),

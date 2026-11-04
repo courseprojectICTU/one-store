@@ -110,56 +110,73 @@ export function extractOrderDetails(
   pendingOrder: any = null,
   allProducts: ProductRecord[] = [],
 ) {
-  const combinedHistory = history.map((h) => h.text).join('\n');
-  const allText = `${combinedHistory}\n${query}`;
   const queryLower = query.toLowerCase().trim();
 
   // 1. Ý định hủy đặt hàng
-  const isCancelIntent = /(?:hủy đơn|hủy đặt|không mua nữa|thôi không mua|hủy đi|thôi bỏ qua|không đặt nữa|hủy mua)/i.test(queryLower);
+  const isCancelIntent = /(?:hủy đơn|hủy đặt|không mua nữa|thôi không mua|hủy đi|thôi bỏ qua|không đặt nữa|hủy mua|hủy giúp|bỏ đơn)/i.test(queryLower);
 
-  // 2. Ý định chốt đơn
+  // 2. Ý định chốt đơn trực tiếp
   const isConfirmIntent = /(?:^|\s)(?:chốt đơn|chốt|xác nhận đơn|xác nhận|đồng ý|ok chốt|chốt luôn|mua luôn|đặt luôn|chốt nhé|chốt nha|chốt giúp|xác nhận mua)(?:\s*!*|$)/i.test(queryLower);
 
-  // 3. Ý định đặt hàng chung
+  // 3. Ý định tìm kiếm, khám phá hoặc lọc sản phẩm (Discovery & Filter Intent)
+  const isDiscoveryIntent = /(?:tìm|kiếm|xem|tư vấn|gợi ý|có mẫu nào|mẫu nào|đôi nào|dưới|trên|khoảng|tầm|dao động|giao động|giá rẻ|giá tốt|chạy bộ|thời trang|bóng rổ|dã ngoại|đổi mẫu|mẫu khác|đôi khác|size khác|màu khác)/i.test(queryLower);
+
+  // 4. Phát hiện chuyển ngữ cảnh (Context Switch): Khách đổi sang tìm kiếm/hỏi giá/hỏi chính sách hoặc hủy đơn
+  const isContextSwitch =
+    isCancelIntent ||
+    (Boolean(pendingOrder) && isDiscoveryIntent && !isConfirmIntent);
+
+  // 5. Ý định đặt hàng: CHỈ xét trên lượt nói hiện tại của khách hàng (queryLower)
   const isOrderIntent =
     isConfirmIntent ||
-    /(?:mua|đặt\s+(?:\d+\s+)?(?:đôi|chiếc|hàng|giày)?|lấy\s+(?:\d+\s+)?(?:đôi|chiếc)?|lên đơn|ship\s+(?:cho|đến|về)|order|cho tôi đặt|cho mình đặt|tôi muốn lấy|muốn mua|muốn đặt)/i.test(allText) ||
+    /(?:^|\s)(?:mua|đặt\s+(?:\d+\s+)?(?:đôi|chiếc|hàng|giày)?|lấy\s+(?:\d+\s+)?(?:đôi|chiếc)?|lên đơn|ship\s+(?:cho|đến|về)|order|cho tôi đặt|cho mình đặt|tôi muốn lấy|muốn mua|muốn đặt)(?:\s|$)/i.test(queryLower) ||
     /(?:họ\s*tên|người\s*nhận|sđt|điện\s*thoại|địa\s*chỉ)/i.test(query);
 
-  // Trích xuất Số điện thoại
+  // Trích xuất Số điện thoại (Chỉ từ câu hỏi hiện tại hoặc lượt nói của khách gần nhất)
   let phone: string | null = null;
   const phonePattern = /(?:(?:\+84|84|0)[35789]\d{8})\b/;
   const phoneLabelPattern = /(?:sđt|số\s*điện\s*thoại|điện\s*thoại|sdt|phone|tel)\s*[:=]?\s*([0-9+.\s-]{9,15})/i;
 
-  const phoneLabelMatch = query.match(phoneLabelPattern) || combinedHistory.match(phoneLabelPattern);
+  const userTurns = history.filter((h) => h.role === 'user');
+  const lastUserText = userTurns.length > 0 ? userTurns[userTurns.length - 1].text : '';
+
+  const phoneLabelMatch = query.match(phoneLabelPattern) || lastUserText.match(phoneLabelPattern);
   if (phoneLabelMatch) {
     const raw = phoneLabelMatch[1].replace(/[\s.-]/g, '').replace(/^\+84/, '0').replace(/^84/, '0');
     if (/^0[35789]\d{8}$/.test(raw)) phone = raw;
   }
   if (!phone) {
-    const rawMatch = query.match(phonePattern) || combinedHistory.match(phonePattern);
+    const rawMatch = query.match(phonePattern) || lastUserText.match(phonePattern);
     if (rawMatch) {
       const raw = rawMatch[0].replace(/[\s.-]/g, '').replace(/^\+84/, '0').replace(/^84/, '0');
       if (/^0[35789]\d{8}$/.test(raw)) phone = raw;
     }
   }
 
+  // Danh sách từ khóa cấm khi trích xuất họ tên (Blacklist chống rách câu/nuốt nhãn)
+  const isInvalidName = (str: string) => {
+    return /(?:sđt|số\s*điện\s*thoại|điện\s*thoại|địa\s*chỉ|size|màu|nhận\s*hàng|họ\s*tên|tên\s*sản\s*phẩm|số\s*lượng)/i.test(str);
+  };
+
   // Trích xuất Họ tên
   let customerName: string | null = null;
   const nameLabelMatch =
-    query.match(/(?:họ\s*(?:và\s*)?tên|tên\s*(?:người\s*nhận|khách)?|người\s*nhận|tên)\s*[:=]\s*([^\n,;]+)/i) ||
-    combinedHistory.match(/(?:họ\s*(?:và\s*)?tên|tên\s*(?:người\s*nhận|khách)?|người\s*nhận|tên)\s*[:=]\s*([^\n,;]+)/i);
+    query.match(/(?:họ\s*(?:và\s*)?tên|tên\s*(?:người\s*nhận|khách)?|người\s*nhận)\s*[:=]\s*([^\n,;]+)/i) ||
+    lastUserText.match(/(?:họ\s*(?:và\s*)?tên|tên\s*(?:người\s*nhận|khách)?|người\s*nhận)\s*[:=]\s*([^\n,;]+)/i);
+
   if (nameLabelMatch) {
     let rawName = nameLabelMatch[1].trim().replace(/^[-*•\s]+/, '').replace(/[*_]/g, '');
     rawName = rawName.replace(/[,;.]?\s*(?:sđt|địa chỉ|size|màu|số lượng)[\s\S]*$/i, '').trim();
-    if (rawName.length >= 2) customerName = rawName;
+    if (rawName.length >= 2 && rawName.length <= 40 && !isInvalidName(rawName)) {
+      customerName = rawName;
+    }
   }
   if (!customerName) {
-    const selfNameMatch = query.match(/(?:mình\s*tên\s*là|tôi\s*tên\s*là|tên\s*mình\s*là)\s+([A-ZÀ-Ỹa-zà-ỹ\s]{2,30})/i);
+    const selfNameMatch = query.match(/(?:mình\s*tên\s*là|tôi\s*tên\s*là|tên\s*mình\s*là|tên\s*tôi\s*là)\s+([A-ZÀ-Ỹa-zà-ỹ\s]{2,30})/i);
     if (selfNameMatch) {
       let rawName = selfNameMatch[1].trim();
       rawName = rawName.replace(/[,;.]?\s*(?:sđt|địa chỉ|size|màu|số lượng)[\s\S]*$/i, '').trim();
-      customerName = rawName;
+      if (!isInvalidName(rawName)) customerName = rawName;
     }
   }
 
@@ -167,17 +184,19 @@ export function extractOrderDetails(
   let address: string | null = null;
   const addressLabelMatch =
     query.match(/(?:địa\s*chỉ|giao\s*(?:đến|về|tận)|nhận\s*tại|ship\s*(?:đến|về)|đ\/c|dc)\s*[:=]?\s*([^\n;]+)/i) ||
-    combinedHistory.match(/(?:địa\s*chỉ|giao\s*(?:đến|về|tận)|nhận\s*tại|ship\s*(?:đến|về)|đ\/c|dc)\s*[:=]?\s*([^\n;]+)/i);
+    lastUserText.match(/(?:địa\s*chỉ|giao\s*(?:đến|về|tận)|nhận\s*tại|ship\s*(?:đến|về)|đ\/c|dc)\s*[:=]?\s*([^\n;]+)/i);
+
   if (addressLabelMatch) {
     let rawAddr = addressLabelMatch[1].trim().replace(/^[-*•\s]+/, '').replace(/[*_]/g, '');
     rawAddr = rawAddr.replace(/[,;.]?\s*(?:màu|size|cỡ|sz|sl|số\s*lượng|sđt|điện\s*thoại|tên|họ\s*tên)[\s\S]*$/i, '').trim();
-    if (rawAddr.length >= 6) {
+    // Loại trừ nếu dính văn bản mẫu hướng dẫn của bot
+    if (rawAddr.length >= 6 && !rawAddr.toLowerCase().startsWith('nhận hàng (số nhà')) {
       address = rawAddr;
     }
   }
   if (!address) {
     const addrLine = query.split('\n').find((line) => /(?:số\s*\d+|đường|phố|phường|xã|quận|huyện|thành\s*phố|tp\.|tỉnh|hà\s*nội|hồ\s*chí\s*minh|tphcm|đà\s*nẵng)/i.test(line));
-    if (addrLine && addrLine.trim().length >= 8 && !/(?:sđt|điện thoại|size|màu)/i.test(addrLine)) {
+    if (addrLine && addrLine.trim().length >= 8 && !/(?:sđt|điện thoại|size|màu|tên)/i.test(addrLine) && !addrLine.toLowerCase().includes('ví dụ')) {
       address = addrLine.trim().replace(/^[-*•\s]+/, '');
     }
   }
@@ -187,7 +206,7 @@ export function extractOrderDetails(
   const qtyMatch =
     query.match(/(?:số\s*lượng|sl|qty)\s*[:=]?\s*(\d+)/i) ||
     query.match(/(\d+)\s*(?:đôi|chiếc)/i) ||
-    combinedHistory.match(/(?:số\s*lượng|sl|qty)\s*[:=]?\s*(\d+)/i);
+    lastUserText.match(/(?:số\s*lượng|sl|qty)\s*[:=]?\s*(\d+)/i);
   if (qtyMatch) {
     const parsedQty = parseInt(qtyMatch[1], 10);
     if (!isNaN(parsedQty) && parsedQty > 0 && parsedQty <= 50) {
@@ -195,9 +214,10 @@ export function extractOrderDetails(
     }
   }
 
-  // Trích xuất Sản phẩm phù hợp nhất
+  // Trích xuất Sản phẩm phù hợp nhất (Role-Gated Product Scorer)
   let matchedProduct: ProductRecord | null = null;
-  if (pendingOrder && pendingOrder.productId) {
+  // Chỉ sử dụng pendingOrder nếu không có sự chuyển đổi ngữ cảnh
+  if (!isContextSwitch && pendingOrder && pendingOrder.productId) {
     matchedProduct = allProducts.find((p) => p.id === pendingOrder.productId) || null;
   }
 
@@ -205,32 +225,35 @@ export function extractOrderDetails(
     let bestScore = 0;
     const scores = new Map<number, number>();
 
-    // 1. Chấm điểm trực tiếp trên câu hỏi hiện tại (query)
+    // 1. Chấm điểm trực tiếp trên câu hỏi hiện tại của khách (queryLower)
     for (const p of allProducts) {
       const pNameLower = p.name.toLowerCase();
       const pTokens = pNameLower.split(' ').slice(1);
       const modelKeywords = pTokens.join(' ');
 
       let score = 0;
+      const brand = pNameLower.split(' ')[0];
       if (queryLower.includes(pNameLower)) score += 100;
       else if (queryLower.includes(modelKeywords)) score += 80;
       else {
         const matchCount = pTokens.filter((t) => t.length > 2 && queryLower.includes(t)).length;
         if (matchCount >= 2) score += 60;
-        else if (matchCount === 1) score += 30;
+        else if (matchCount === 1) score += queryLower.includes(brand) ? 55 : 30;
       }
       if (score > 0) scores.set(p.id!, score);
     }
 
-    // 2. Nếu câu hỏi hiện tại chưa có tên sản phẩm cụ thể, quét ngược lịch sử chat từ lượt mới nhất trở về trước
+    // 2. Nếu câu hỏi hiện tại chưa có tên sản phẩm cụ thể, quét ngược lịch sử chat
+    // QUY TẮC BẢO MẬT: CHỈ QUÉT LƯỢT NÓI CỦA NGƯỜI DÙNG (turn.role === 'user')
+    // Tuyệt đối không quét tin nhắn của Assistant để chống tự ngộ nhận ví dụ minh họa
     if ([...scores.values()].every((s) => s < 60) && Array.isArray(history) && history.length > 0) {
       const reversedHistory = [...history].reverse();
       for (let hIdx = 0; hIdx < reversedHistory.length; hIdx++) {
         const turn = reversedHistory[hIdx];
+        if (turn.role !== 'user') continue; // BỎ QUA 100% TIN NHẮN BOT
+
         const turnLower = turn.text.toLowerCase();
-        // Ưu tiên cao hơn nếu khách hàng trực tiếp nêu tên sản phẩm, và ưu tiên lượt gần hơn
         const recencyMultiplier = Math.max(0.5, 1 - hIdx * 0.2);
-        const roleMultiplier = turn.role === 'user' ? 2.5 : 1.0;
 
         for (const p of allProducts) {
           const pNameLower = p.name.toLowerCase();
@@ -246,7 +269,7 @@ export function extractOrderDetails(
           }
 
           if (turnScore > 0) {
-            const finalWeighted = Math.round(turnScore * recencyMultiplier * roleMultiplier);
+            const finalWeighted = Math.round(turnScore * recencyMultiplier * 2.5);
             const current = scores.get(p.id!) || 0;
             if (finalWeighted > current) {
               scores.set(p.id!, finalWeighted);
@@ -254,15 +277,14 @@ export function extractOrderDetails(
           }
         }
 
-        // Nếu lượt user gần nhất đã chỉ đích danh sản phẩm, dừng quét để tránh nhầm với gợi ý của bot
-        if (turn.role === 'user' && [...scores.values()].some((s) => s >= 70)) {
+        if ([...scores.values()].some((s) => s >= 70)) {
           break;
         }
       }
     }
 
     for (const [id, score] of scores.entries()) {
-      if (score > bestScore && score >= 30) {
+      if (score > bestScore && score >= 40) {
         bestScore = score;
         matchedProduct = allProducts.find((p) => p.id === id) || null;
       }
@@ -274,7 +296,7 @@ export function extractOrderDetails(
   const sizeMatch =
     query.match(/(?:size|cỡ|sz)\s*[:=]?\s*(\d{2}(?:\.5)?)/i) ||
     query.match(/\b(?:cỡ|size|sz)\s+(\d{2}(?:\.5)?)\b/i) ||
-    combinedHistory.match(/(?:size|cỡ|sz)\s*[:=]?\s*(\d{2}(?:\.5)?)/i);
+    lastUserText.match(/(?:size|cỡ|sz)\s*[:=]?\s*(\d{2}(?:\.5)?)/i);
   if (sizeMatch) {
     size = sizeMatch[1];
   } else if (matchedProduct) {
@@ -293,7 +315,7 @@ export function extractOrderDetails(
   let color: string | null = null;
   const colorMatch =
     query.match(/(?:màu\s*(?:sắc)?|color)\s*[:=]?\s*([^\n,;.]+)/i) ||
-    combinedHistory.match(/(?:màu\s*(?:sắc)?|color)\s*[:=]?\s*([^\n,;.]+)/i);
+    lastUserText.match(/(?:màu\s*(?:sắc)?|color)\s*[:=]?\s*([^\n,;.]+)/i);
   if (colorMatch) {
     color = colorMatch[1].trim().replace(/^[-*•\s]+/, '').replace(/[*_]/g, '');
   }
@@ -301,7 +323,7 @@ export function extractOrderDetails(
     try {
       const validColors = JSON.parse(matchedProduct.colors);
       for (const vc of validColors) {
-        if (queryLower.includes(vc.toLowerCase()) || (combinedHistory && combinedHistory.toLowerCase().includes(vc.toLowerCase()))) {
+        if (queryLower.includes(vc.toLowerCase()) || (lastUserText && lastUserText.toLowerCase().includes(vc.toLowerCase()))) {
           color = vc;
           break;
         }
@@ -323,15 +345,11 @@ export function extractOrderDetails(
     isOrderIntent,
     isConfirmIntent,
     isCancelIntent,
+    isDiscoveryIntent,
+    isContextSwitch,
   };
 }
 
-/**
- * Hàm phân đoạn văn bản thông minh (Smart Chunking) cho Chatbot AI RAG:
- * - maxLength: Giới hạn độ dài tối đa mỗi chunk (mặc định 1100 ký tự).
- * - overlap: Độ dài gối đầu giữa các chunk liền kề (mặc định 140 ký tự) nhằm bảo toàn ngữ cảnh liền mạch.
- * - Ngắt thông minh: Ưu tiên ngắt tại ranh giới xuống dòng (\n\n, \n) hoặc dấu chấm câu (. ) thay vì cắt ngang từ ngữ.
- */
 export function splitIntoChunks(
   text: string,
   maxLength = 1100,
@@ -930,14 +948,21 @@ async function processChatPipeline(
   // Bóc tách ý định & thực thể đặt hàng
   const orderDetails = extractOrderDetails(question, history, pendingOrder, allAvailableProducts);
 
-  // === NHÁNH 1: KHÁCH HÀNG HỦY YÊU CẦU ĐẶT HÀNG ===
+  // === NHÁNH 1: KHÁCH HÀNG HỦY YÊU CẦU ĐẶT HÀNG HOẶC CHUYỂN NGỮ CẢNH ===
   if (orderDetails.isCancelIntent) {
+    await emitter.orderReady({ readyToConfirm: false, pendingOrder: null });
     await emitter.delta(
       'Dạ vâng ạ, One - Store đã hủy yêu cầu lên đơn này. Nếu bạn muốn tham khảo thêm mẫu giày thể thao nào khác hoặc cần tư vấn chọn size theo dáng chân, bạn cứ nhắn cho One bất kỳ lúc nào nhé!',
     );
     await emitter.chips?.(['Tìm giày chạy bộ', 'Xem sneaker thời trang', 'Tư vấn dáng chân']);
     await emitter.done();
     return;
+  }
+
+  // NẾU PHÁT HIỆN CHUYỂN NGỮ CẢNH (Khách đổi sang hỏi tìm kiếm, hỏi giá, hỏi chính sách):
+  // Xóa bỏ pendingOrder và chuyển quyền điều khiển cho Nhánh 4 (Bộ lọc SQL & RAG)
+  if (orderDetails.isContextSwitch && pendingOrder) {
+    await emitter.orderReady({ readyToConfirm: false, pendingOrder: null });
   }
 
   // === NHÁNH 2: KHÁCH HÀNG NHẮN "CHỐT ĐƠN" / XÁC NHẬN ĐƠN HÀNG THỰC TẾ ===
@@ -1130,7 +1155,16 @@ Trước khi thanh toán, bạn hoàn toàn được **đồng kiểm và xỏ t
   }
 
   // === NHÁNH 3: KHÁCH HÀNG GỬI THÔNG TIN HOẶC BÀY TỎ Ý ĐỊNH ĐẶT HÀNG ===
-  if (orderDetails.isOrderIntent || (orderDetails.customerName && orderDetails.phone)) {
+  // Điều kiện kích hoạt chặt chẽ:
+  // 1. Khách hàng đã chọn được sản phẩm sneaker có thật trong kho (matchedProduct !== null) VÀ có ý định mua
+  // 2. HOẶC khách hàng chủ động gửi thông tin liên hệ đầy đủ (SĐT + Địa chỉ)
+  // 3. VÀ tuyệt đối KHÔNG đang trong trạng thái chuyển ngữ cảnh tìm kiếm (isContextSwitch === false)
+  const hasContactInfo = Boolean(orderDetails.phone && (orderDetails.address || orderDetails.customerName));
+  const canEnterOrdering =
+    !orderDetails.isContextSwitch &&
+    ((orderDetails.product && (orderDetails.isOrderIntent || orderDetails.isConfirmIntent)) || hasContactInfo);
+
+  if (canEnterOrdering) {
     const product = orderDetails.product;
     const { size, color, quantity, customerName, phone, address } = orderDetails;
 
@@ -1281,7 +1315,7 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
         'One - Store hỗ trợ giao hàng COD toàn quốc, đồng kiểm và xỏ thử tận nơi trước khi thanh toán ạ!';
     } else {
       promptText = 'Dạ chào bạn! Để One - Store lên đơn và giao hàng tận nơi cho bạn, bạn vui lòng gửi giúp One các thông tin đơn hàng theo mẫu sau nhé:\n' +
-        '- Tên sản phẩm: (ví dụ: Asics Novablast 4 Trampoline)\n' +
+        '- Tên mẫu giày bạn muốn đặt:\n' +
         '- Size giày: (ví dụ: 39)\n' +
         '- Màu sắc: (ví dụ: Đen)\n' +
         '- Số lượng: (Mặc định 1 đôi)\n' +

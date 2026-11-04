@@ -1115,6 +1115,28 @@ Dự án đã trải qua hành trình nâng cấp toàn diện qua 27 cột mố
           * Next.js 16 Static Export biên dịch thành công 0 lỗi.
           * Triển khai hoàn tất lên Production: `https://one-store.onestoresportsshoes.workers.dev` (Version ID: `67868348-023b-400a-be88-4ca7e158f470`).
 
+    47. **Tối Ưu Hóa Định Tuyến Ý Định (Intent Routing) & Giải Phóng Triệt Để Trạng Thái Kẹt Luồng Đặt Hàng Chatbot AI**:
+        - **Bối cảnh & Phát hiện nguyên nhân gốc rễ**:
+          * Sau khi nâng cấp Chatbot v2.0, thực nghiệm hội thoại phát hiện sự cố nghiêm trọng: Khách hàng bị kẹt vĩnh viễn trong biểu mẫu đặt hàng của một mẫu giày duy nhất (`Asics Novablast 4 Trampoline`), không thể thoát ra để tìm kiếm sản phẩm khác, hỏi giá hay nhận phản hồi chống ảo giác đối với sản phẩm ngoài danh mục ("tôi muốn mua coffee").
+          * 5 nguyên nhân gốc rễ đã được bóc tách:
+            1. *Bẫy lịch sử (`History Pollution`)*: Biến `allText` gộp toàn bộ lịch sử chat cũ; chỉ cần khách từng nói từ "mua" một lần ở quá khứ, `isOrderIntent` luôn bằng `true` trong mọi lượt chat sau.
+            2. *Kẹt trong State `pendingOrder` (`State Lock`)*: Client và Backend duy trì `pendingOrder` liên tục mà không có cơ chế phát hiện chuyển ngữ cảnh khi khách đổi chủ đề.
+            3. *Bot tự trích xuất ví dụ của chính mình (`Self-Referencing`)*: Khi khách không nêu tên giày, thuật toán quét ngược lịch sử đã quét trúng chính tin nhắn ví dụ của Bot (`- Tên sản phẩm: (ví dụ: Asics Novablast 4 Trampoline)`), tự ngộ nhận khách đã chọn mẫu này.
+            4. *Kích hoạt chốt đơn ngoài ngành*: Khách hỏi "mua coffee", "áo thun" bị đẩy vào form đặt hàng COD thay vì đẩy về RAG Chống Ảo Giác để từ chối lịch sự.
+            5. *Rách câu bóc tách thực thể*: Regex quét họ tên và địa chỉ trên cả văn bản mẫu của bot, gây lỗi hiển thị rách nhãn (`Họ và tên: Số điện thoại nhận hàng:`, `Địa chỉ: nhận hàng (Số nhà`).
+        - **Triển khai khắc phục toàn diện theo kế hoạch đã phê duyệt**:
+          * **Trụ cột 1 - Tinh lọc Turn-Level Intent Routing**: `isOrderIntent` chỉ được xét trên câu hỏi hiện tại (`queryLower`), chấm dứt triệt để việc gộp `allText`. Phân định rõ `isDiscoveryIntent` cho các câu hỏi tìm kiếm, hỏi giá, hỏi mẫu.
+          * **Trụ cột 2 - Bộ phát hiện Chuyển Ngữ Cảnh (Context Switch Detection)**: Nhận diện khi khách đổi sang tìm kiếm, hỏi giá ("dưới 1 triệu"), hỏi mẫu khác hoặc hủy đơn; lập tức hủy bỏ `pendingOrder = null`, phát sự kiện SSE `order_ready: { readyToConfirm: false, pendingOrder: null }` và chuyển toàn quyền cho Bộ lọc Sản phẩm SQL + RAG.
+          * **Trụ cột 3 - Phân quyền vai trò quét lịch sử (Role-Gated Product Scorer)**: Khi duyệt ngược `history`, chỉ quét các lượt nói của khách hàng (`turn.role === 'user'`), bỏ qua 100% tin nhắn của Assistant. Xóa bỏ hoàn toàn ví dụ hardcode mẫu giày trong văn bản form của bot.
+          * **Trụ cột 4 - Làm sạch bộ bóc tách thực thể (Entity Sanitizer)**: Ràng buộc blacklist loại trừ từ khóa hệ thống (SĐT, địa chỉ, size, màu) khi bóc tách họ tên; kiểm tra số điện thoại chuẩn 10 chữ số viễn thông Việt Nam.
+          * **Trụ cột 5 - Ràng buộc điều kiện kích hoạt chốt đơn (`canEnterOrdering`)**: Chỉ kích hoạt luồng đặt hàng khi khách đã chọn được sản phẩm sneaker có thật trong kho (`matchedProduct !== null`) HOẶC có đầy đủ thông tin giao hàng (SĐT + Địa chỉ). Mọi câu hỏi ngoài ngành ("mua coffee", "quần áo") lập tức chuyển sang RAG Chống Ảo Giác để từ chối lịch sự và gợi ý sneaker chính hãng trong kho.
+        - **Kết Quả Nghiệm Thu**:
+          * Script `scripts/test_chatbot_intent_routing.ts` đạt **26/26 tiêu chí (100% Pass)**.
+          * Toàn bộ kịch bản kiểm thử trực tiếp trên Cloudflare Workers Production (`ba109148-a702-45bd-bbbc-741ea7a89e83`) đạt chuẩn 100%:
+            + "tôi muốn mua coffee": Phản hồi từ chối lịch sự qua RAG, gợi ý sneaker chính hãng, không gửi form đặt hàng COD.
+            + "làm thế nào để mua": Hướng dẫn các bước đặt hàng, tuyệt đối không tự gán mẫu Asics.
+            + "Tìm đôi dưới 1 triệu": Tự động hủy pendingOrder, giải thích trung thực kho D1 không có giá dưới 1 triệu và gợi ý phương án.
+
 
 
 ---
@@ -1280,6 +1302,10 @@ one-store/
 | `frontend/src/types/index.ts` | Modified | Mở rộng ChatMessage hỗ trợ chips, status, isStreaming cho phiên bản v2.0. |
 | `frontend/src/components/ChatbotWidget.tsx` | Modified | Giao diện Chatbot v2.0: SSE streaming reader, micro ghi âm giọng nói, nút dừng phản hồi, và nút mua kèm phụ kiện (Cross-selling). |
 | `scripts/test_chatbot_v2.mjs` | Created | Bộ kiểm thử tự động 17/17 tiêu chí xác thực Fast Local Pre-Router, Speech Sanitizer và SSE endpoints. |
+| `docs/KE_HOACH_TOI_UU_INTENT_ROUTING_CHATBOT.md` | Created | Bản kế hoạch kỹ thuật tối ưu hóa Intent Routing và giải phóng trạng thái kẹt luồng đặt hàng Chatbot v2.0. |
+| `scripts/test_chatbot_intent_routing.ts` | Created | Bộ kiểm thử tự động 26/26 tiêu chí xác thực Turn-level Intent, Context Switch và Role-Gated Scorer. |
+| `backend/src/chatbot.ts` | Modified | Nâng cấp Intent Routing theo câu hiện tại, Context Switch Detection, Role-Gated Scorer (role === 'user') và Entity Sanitizer. |
+| `frontend/src/components/ChatbotWidget.tsx` | Modified | Nhận diện sự kiện reset pendingOrder = null khi context switch, làm sạch state tức thì. |
 
 
 ---
