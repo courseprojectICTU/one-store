@@ -1218,6 +1218,16 @@ one-store/
 | `frontend/src/app/policies/page.tsx` | Created | Trang chính sách bán hàng 6 tabs chuyên biệt (Cam kết, Giao hàng đồng kiểm, Đổi trả 7 ngày, Bảo hành, Bảo mật, Size guide). |
 | `frontend/src/components/Header.tsx` | Modified | Bổ sung liên kết `CHÍNH SÁCH` (`POLICIES`) trên thanh điều hướng chính. |
 | `frontend/src/components/Footer.tsx` | Modified | Cập nhật các liên kết chính sách trỏ trực tiếp sang `/policies?tab=...`. |
+| `backend/migrations/0016_seed_demo_admin_sandbox.sql` | Created | Seed tài khoản Demo Admin (username: `demo`, role: `demo`, pass: `DemoAdmin@2026`) vào CSDL D1. |
+| `backend/src/admin.ts` | Modified | Bổ sung hàm `requireWritePermission`, endpoint `POST /admin/auth/demo-login` và chặn đổi pass của demo. |
+| `backend/src/index.ts` | Modified | Chặn 100% quyền ghi/xóa sản phẩm/đơn hàng (`POST`, `PATCH`, `DELETE`) đối với tài khoản demo (403 Forbidden). |
+| `backend/src/commerce.ts` | Modified | Chặn thao tác tạo/sửa voucher đối với tài khoản demo, cho phép xem danh sách voucher/customers/overview. |
+| `backend/src/chatbot.ts` | Modified | Chặn thêm/xóa/đồng bộ tài liệu tri thức đối với tài khoản demo, cho phép xem danh sách tài liệu. |
+| `frontend/src/app/admin/page.tsx` | Modified | Thêm hộp đăng nhập nhanh Demo Sandbox 1-click, Banner cảnh báo Sandbox và chặn action ghi ở phía Client. |
+| `frontend/src/app/admin/admin.css` | Modified | Thêm CSS cho `admin-demo-box`, `admin-demo-btn`, `admin-sandbox-alert` tông hổ phách / vàng cam. |
+| `scripts/test_demo_admin_sandbox.mjs` | Created | Bộ kiểm thử tự động 21/21 tiêu chí xác thực cơ chế cách ly quyền dữ liệu và Sandbox. |
+| `README.md` | Modified | Cập nhật toàn diện tài liệu kỹ thuật chuẩn Enterprise, Zero-Emoji 100%, chi tiết API và cấu trúc Monorepo. |
+
 
 ---
 
