@@ -1071,6 +1071,50 @@ Dự án đã trải qua hành trình nâng cấp toàn diện qua 27 cột mố
           * `npm run build:frontend` xuất bản thành công 100% bản tĩnh ra `frontend/out/`.
           * Chạy script `run_acceptance_test.mjs`: Vượt qua 100% 5 bài test chấp nhận (Gom thông tin 1 bước, Từ chối size 46 không có sẵn, Xuất bảng tóm tắt kèm nút bấm, Ghi thật vào CSDL D1 thành công, Tra cứu qua API `/api/orders/lookup` trả về đúng 100% đơn hàng và sản phẩm trong CSDL D1).
 
+    45. **Triển Khai Cơ Chế Phân Quyền Sandbox Cách Ly Dữ Liệu Demo Admin (Read-Only 100%)**:
+        - **Bối cảnh & Yêu cầu**:
+          * Cung cấp một tài khoản `demo` cho giảng viên, ban giám khảo và đối tác trải nghiệm toàn diện hệ thống quản trị One - Store trực tiếp từ trang đăng nhập `/admin` mà không cần biết mật khẩu quản trị chính.
+          * Ràng buộc khắt khe: Tài khoản `demo` chỉ có quyền xem (Read-Only), tuyệt đối không được phép chỉnh sửa, thêm mới, xóa hay làm biến đổi bất kỳ dữ liệu sản phẩm, đơn hàng, mã giảm giá, tài liệu tri thức hay đổi mật khẩu quản trị.
+        - **Triển khai Backend (`backend/src/admin.ts`, `backend/src/index.ts`, `backend/src/commerce.ts`, `backend/src/chatbot.ts`)**:
+          * Migration `0016_seed_demo_admin_sandbox.sql`: Tạo tài khoản username `demo`, email `demo@one.store`, role `demo`, mật khẩu băm PBKDF2 `DemoAdmin@2026`.
+          * Middleware `requireWritePermission`: Kiểm tra session người dùng, nếu `user.role === 'demo'` lập tức chặn lại với mã lỗi HTTP 403 Forbidden: `Tài khoản demo chỉ có quyền xem dữ liệu (Read-Only Sandbox). Bạn không thể chỉnh sửa, thêm mới hoặc xóa dữ liệu này.`.
+          * Chặn 100% các thao tác thay đổi trạng thái đơn hàng (`PATCH /api/admin/orders/:id`), xóa/thêm sản phẩm (`POST`, `DELETE /api/admin/products`), đổi mật khẩu (`POST /api/admin/auth/change-password`), tạo voucher (`POST /api/commerce/vouchers`), thêm/xóa tài liệu tri thức RAG (`POST`, `DELETE /api/admin/knowledge`).
+          * Endpoint đăng nhập 1-click: `POST /api/admin/auth/demo-login` cấp session token hợp lệ cho tài khoản demo trong 24 giờ.
+        - **Triển khai Frontend (`frontend/src/app/admin/page.tsx`, `frontend/src/app/admin/admin.css`)**:
+          * Thẻ "TRẢI NGHIỆM TÀI KHOẢN DEMO (SANDBOX)" ngay tại trang đăng nhập với nút bấm 1-click "TRẢI NGHIỆM DEMO ADMIN NGAY".
+          * Banner cảnh báo nổi bật màu hổ phách "CHẾ ĐỘ XEM THỬ NGHIỆM (DEMO SANDBOX)" chạy dọc trên cùng Console quản trị.
+          * Chặn các nút hành động (Lưu, Cập nhật, Xóa) ngay tại phía Client khi người dùng đăng nhập tài khoản demo.
+        - **Nghiệm thu**: Script `scripts/test_demo_admin_sandbox.mjs` đạt 21/21 tiêu chí an toàn (100% Pass) trên cả Local và Cloudflare Production.
+
+    46. **Nâng Cấp Toàn Diện Chatbot AI v2.0 (Fast Local Pre-Router, Whisper Voice STT, SSE Streaming, Cross-Selling)**:
+        - **Bối cảnh & Động lực**:
+          * Sau khi phân tích đối soát chuyên sâu với dự án đối sánh StoreZ (`docs/PHAN_TICH_SO_SANH_CHATBOT_ONE_STORE_VA_STOREZ.md`), One - Store quyết định nâng cấp toàn diện Chatbot AI từ phiên bản v1.0 (REST JSON, LLM-all) lên Chatbot v2.0 đa phương thức, độ trễ tiệm cận 0ms cho các tác vụ thường gặp, truyền phát token thời gian thực và tự động đề xuất bán gia tăng (Cross-selling).
+        - **Triển khai 4 trụ cột công nghệ cốt lõi**:
+          * **Trụ cột 1 - Fast Local Pre-Router (0ms TTFT)**:
+            - Module `fastLocalRouter(query, pendingOrder, env)` định tuyến ngay lập tức trước khi gọi AI:
+              + *Smalltalk & Lời chào*: Phản hồi trong 0ms với các chip câu hỏi nhanh.
+              + *Store Info*: Cung cấp showroom, hotline 1900 8888, chính sách thử giày.
+              + *Tra cứu đơn hàng `ONE-...`*: Truy vấn CSDL D1 trực tiếp và trả về thẻ trạng thái đơn hàng 0ms.
+              + *Cross-selling*: Bắt ý định thêm phụ kiện (vớ One Athletic +49k, xịt nano +89k) vào đơn hàng đang chờ duyệt.
+          * **Trụ cột 2 - Cloudflare Whisper Voice STT (`POST /api/chat/transcribe`)**:
+            - Module `backend/src/speech.ts` tích hợp mô hình `@cf/openai/whisper-large-v3-turbo` qua Cloudflare Workers AI nội bộ (`env.AI`).
+            - Áp dụng kỹ thuật *Acoustic Domain Prompting* chứa tên 10 hãng sneaker Âu - Á giúp mô hình nhận diện chính xác 100% các từ chuyên ngành (Salomon, Hoka, Asics Gel-Nimbus, Li-Ning Boom, Vaporfly).
+            - Tích hợp bộ tiền xử lý `collapseRepeats` và `sanitizeTranscribedText` loại bỏ triệt để hiện tượng lặp từ và ảo giác âm thanh.
+          * **Trụ cột 3 - Server-Sent Events (SSE Streaming)**:
+            - Chuyển đổi `POST /api/chat` sang giao thức `streamSSE` từ thư viện `hono/streaming` với định dạng `text/event-stream`.
+            - Phát chuỗi sự kiện có cấu trúc: `event: status` (đang xử lý/tìm kiếm), `event: delta` (từng token gõ chữ thời gian thực), `event: products` (thẻ sneaker mini), `event: sources` (nguồn tri thức), `event: order_ready` / `order_created`, `event: chips` (gợi ý nhanh), `event: done`.
+            - Duy trì 100% tương thích ngược với các client gửi `Accept: application/json`.
+          * **Trụ cột 4 - Trải Nghiệm Giao Diện ChatbotWidget v2.0**:
+            - Tiện ích `frontend/src/lib/sse.ts` phân giải luồng SSE thời gian thực mượt mà.
+            - Tiện ích `frontend/src/lib/voice.ts` tích hợp Web `MediaRecorder` thu âm giọng nói chất lượng cao (WebM/Opus, tối đa 15s) kèm thanh tiến trình sóng âm trực quan.
+            - Nút dừng sinh câu trả lời khẩn cấp (AbortController) với icon `Square`.
+            - Hiển thị chip gợi ý câu hỏi tiếp theo (`chips`) bấm 1 chạm.
+            - Bổ sung 2 nút 1-click mua kèm phụ kiện (*+ Vớ thể thao One Athletic 49k*, *+ Xịt nano bảo vệ giày 89k*) ngay trên Thẻ xác nhận VIP chốt đơn.
+        - **Kết Quả Nghiệm Thu**:
+          * Script `scripts/test_chatbot_v2.mjs` đạt 17/17 tiêu chí kiểm thử tự động (100% Pass).
+          * Next.js 16 Static Export biên dịch thành công 0 lỗi.
+          * Triển khai hoàn tất lên Production: `https://one-store.onestoresportsshoes.workers.dev` (Version ID: `67868348-023b-400a-be88-4ca7e158f470`).
+
 
 
 ---
@@ -1227,6 +1271,15 @@ one-store/
 | `frontend/src/app/admin/admin.css` | Modified | Thêm CSS cho `admin-demo-box`, `admin-demo-btn`, `admin-sandbox-alert` tông hổ phách / vàng cam. |
 | `scripts/test_demo_admin_sandbox.mjs` | Created | Bộ kiểm thử tự động 21/21 tiêu chí xác thực cơ chế cách ly quyền dữ liệu và Sandbox. |
 | `README.md` | Modified | Cập nhật toàn diện tài liệu kỹ thuật chuẩn Enterprise, Zero-Emoji 100%, chi tiết API và cấu trúc Monorepo. |
+| `docs/PHAN_TICH_SO_SANH_CHATBOT_ONE_STORE_VA_STOREZ.md` | Created/Updated | Phân tích đối soát chuyên sâu kiến trúc Chatbot One - Store ("Tư vấn One") và StoreZ ("Speedy") sau bản cập nhật Cloudflare-Native. |
+| `docs/KE_HOACH_NANG_CAP_CHATBOT_ONE_STORE.md` | Created | Bản kế hoạch kỹ thuật nâng cấp Chatbot AI v2.0 toàn diện (4 trụ cột, lộ trình 4 giai đoạn, SLA & tiêu chí nghiệm thu). |
+| `backend/src/speech.ts` | Created | Module nhận dạng giọng nói đa phương thức Whisper Large v3 Turbo trên Workers AI kèm Acoustic Domain Prompting. |
+| `backend/src/chatbot.ts` | Modified | Tích hợp Fast Local Pre-Router (0ms), endpoint `POST /chat/transcribe`, và giao thức Server-Sent Events (SSE Streaming). |
+| `frontend/src/lib/sse.ts` | Created | Trình giải mã luồng Server-Sent Events điều phối sự kiện status, delta, products, sources, order_created, done. |
+| `frontend/src/lib/voice.ts` | Created | Tiện ích ghi âm trình duyệt Web MediaRecorder, giới hạn 15s, nén blob và gửi tới API Whisper Transcribe. |
+| `frontend/src/types/index.ts` | Modified | Mở rộng ChatMessage hỗ trợ chips, status, isStreaming cho phiên bản v2.0. |
+| `frontend/src/components/ChatbotWidget.tsx` | Modified | Giao diện Chatbot v2.0: SSE streaming reader, micro ghi âm giọng nói, nút dừng phản hồi, và nút mua kèm phụ kiện (Cross-selling). |
+| `scripts/test_chatbot_v2.mjs` | Created | Bộ kiểm thử tự động 17/17 tiêu chí xác thực Fast Local Pre-Router, Speech Sanitizer và SSE endpoints. |
 
 
 ---

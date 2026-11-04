@@ -127,4 +127,7 @@ export type ChatMessage = {
   readyToConfirm?: boolean;
   createdOrder?: CreatedOrderInfo;
   pendingOrder?: PendingOrderInfo;
+  chips?: string[];
+  status?: string;
+  isStreaming?: boolean;
 };

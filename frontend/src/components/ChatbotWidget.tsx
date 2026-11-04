@@ -5,6 +5,8 @@ import { api, money, imageOf } from '@/lib/api';
 import { ChatMessage, PendingOrderInfo } from '@/types';
 import Logo from './Logo';
 import { useShop } from '@/context/ShopContext';
+import { readSSEStream } from '@/lib/sse';
+import { VoiceRecorder, transcribeAudioBlob } from '@/lib/voice';
 import {
   MessageSquare,
   X,
@@ -17,6 +19,9 @@ import {
   Copy,
   Check,
   ExternalLink,
+  Mic,
+  MicOff,
+  Square,
 } from 'lucide-react';
 
 /**
@@ -170,6 +175,16 @@ export default function ChatbotWidget() {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Trạng thái thu âm giọng nói (Whisper AI)
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
+
+  // Trạng thái streaming SSE thời gian thực và ngắt luồng
+  const [statusText, setStatusText] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const handleCopyCode = (code: string) => {
     try {
       navigator.clipboard.writeText(code);
@@ -207,9 +222,72 @@ export default function ChatbotWidget() {
     }
   }, [messages, isOpen, isSending]);
 
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsSending(false);
+    setStatusText(null);
+  };
+
+  const handleVoiceToggle = async () => {
+    if (isRecording) {
+      if (!voiceRecorderRef.current) return;
+      try {
+        setIsSending(true);
+        setStatusText(locale === 'vi' ? 'Đang chuyển đổi giọng nói qua Whisper AI...' : 'Transcribing voice via Whisper AI...');
+        const blob = await voiceRecorderRef.current.stop();
+        setIsRecording(false);
+        setRecordingSeconds(0);
+        const transcribed = await transcribeAudioBlob(blob);
+        setStatusText(null);
+        setIsSending(false);
+        if (transcribed && transcribed.trim().length >= 2) {
+          setInputQuestion(transcribed.trim());
+          handleSend(transcribed.trim());
+        }
+      } catch (err: any) {
+        setIsRecording(false);
+        setRecordingSeconds(0);
+        setStatusText(null);
+        setIsSending(false);
+        setVoiceError(err?.message || 'Không thể nhận dạng âm thanh');
+        setTimeout(() => setVoiceError(null), 4500);
+      }
+    } else {
+      if (!VoiceRecorder.isSupported()) {
+        setVoiceError(locale === 'vi' ? 'Trình duyệt không hỗ trợ micro' : 'Browser does not support microphone');
+        setTimeout(() => setVoiceError(null), 3000);
+        return;
+      }
+      setVoiceError(null);
+      const recorder = new VoiceRecorder();
+      recorder.onTick = (sec) => setRecordingSeconds(sec);
+      recorder.onMaxDurationReached = () => {
+        handleVoiceToggle();
+      };
+      voiceRecorderRef.current = recorder;
+
+      try {
+        await recorder.start();
+        setIsRecording(true);
+      } catch (err: any) {
+        setVoiceError(err?.message || 'Lỗi bật micro');
+        setTimeout(() => setVoiceError(null), 4000);
+      }
+    }
+  };
+
   const handleSend = async (questionText?: string) => {
     const q = (questionText || inputQuestion).trim();
     if (!q || isSending) return;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     const userMsg: ChatMessage = {
       id: 'msg-' + Date.now(),
@@ -217,69 +295,195 @@ export default function ChatbotWidget() {
       text: q,
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    const replyMsgId = 'reply-' + Date.now();
+    const initialBotMsg: ChatMessage = {
+      id: replyMsgId,
+      role: 'assistant',
+      text: '',
+      isStreaming: true,
+      sources: [],
+      products: [],
+      chips: [],
+    };
+
+    setMessages((prev) => [...prev, userMsg, initialBotMsg]);
     setInputQuestion('');
     setIsSending(true);
+    setStatusText(locale === 'vi' ? 'Đang kết nối...' : 'Connecting...');
 
     try {
-      // Trích xuất tối đa 6 lượt tin nhắn gần nhất (loại bỏ tin chào mừng 'welcome')
       const recentHistory = messages
-        .filter((m) => m.id !== 'welcome' && (m.role === 'user' || m.role === 'assistant'))
+        .filter((m) => m.id !== 'welcome' && (m.role === 'user' || m.role === 'assistant') && m.text.trim())
         .slice(-6)
         .map((m) => ({
           role: m.role as 'user' | 'assistant',
           text: m.text.slice(0, 2000),
         }));
 
-      const res = await api('/api/chat', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream, application/json',
+        },
         body: JSON.stringify({
           question: q,
           history: recentHistory,
           pendingOrder: pendingOrder || undefined,
+          stream: true,
         }),
+        signal: abortController.signal,
       });
 
-      if (res?.pendingOrder) {
-        setPendingOrder(res.pendingOrder);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson?.error || ('HTTP ' + res.status));
       }
-      if (res?.createdOrder) {
-        setPendingOrder(null);
-        if (res.createdOrder.code) {
-          try {
-            addRecentOrder(res.createdOrder.code);
-          } catch {}
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('text/event-stream')) {
+        let accumulatedText = '';
+        await readSSEStream(
+          res,
+          {
+            onStatus: (msg) => {
+              setStatusText(msg);
+            },
+            onDelta: (chunk) => {
+              accumulatedText += chunk;
+              setStatusText(null);
+              setMessages((prev) =>
+                prev.map((m) => (m.id === replyMsgId ? { ...m, text: accumulatedText } : m)),
+              );
+            },
+            onProducts: (productsList) => {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === replyMsgId ? { ...m, products: productsList } : m)),
+              );
+            },
+            onSources: (sourcesList) => {
+              const srcStrings = sourcesList.map((item: any) =>
+                typeof item === 'string' ? item : item?.title || cb.default_doc_title,
+              );
+              setMessages((prev) =>
+                prev.map((m) => (m.id === replyMsgId ? { ...m, sources: srcStrings } : m)),
+              );
+            },
+            onOrderReady: (data) => {
+              setPendingOrder(data.pendingOrder);
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === replyMsgId
+                    ? {
+                        ...m,
+                        readyToConfirm: data.readyToConfirm,
+                        pendingOrder: data.pendingOrder,
+                      }
+                    : m,
+                ),
+              );
+            },
+            onOrderCreated: (orderData) => {
+              setPendingOrder(null);
+              if (orderData?.code) {
+                try {
+                  addRecentOrder(orderData.code);
+                } catch {}
+              }
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === replyMsgId ? { ...m, createdOrder: orderData } : m,
+                ),
+              );
+            },
+            onDone: () => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === replyMsgId
+                    ? {
+                        ...m,
+                        isStreaming: false,
+                        text: m.text || cb.fallback_response,
+                      }
+                    : m,
+                ),
+              );
+              setIsSending(false);
+              setStatusText(null);
+            },
+            onError: (err) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === replyMsgId
+                    ? {
+                        ...m,
+                        isStreaming: false,
+                        text: m.text || (err?.message || cb.network_error),
+                      }
+                    : m,
+                ),
+              );
+              setIsSending(false);
+              setStatusText(null);
+            },
+          },
+          abortController.signal,
+        );
+      } else {
+        const data = await res.json();
+        if (data?.pendingOrder) setPendingOrder(data.pendingOrder);
+        if (data?.createdOrder) {
+          setPendingOrder(null);
+          if (data.createdOrder.code) {
+            try {
+              addRecentOrder(data.createdOrder.code);
+            } catch {}
+          }
         }
+        const rawSources = Array.isArray(data?.sources) ? data.sources : [];
+        const sources = rawSources.map((item: any) =>
+          typeof item === 'string' ? item : item?.title || cb.default_doc_title,
+        );
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === replyMsgId
+              ? {
+                  ...m,
+                  isStreaming: false,
+                  text: data?.answer || cb.fallback_response,
+                  sources,
+                  products: Array.isArray(data?.products) ? data.products : [],
+                  readyToConfirm: Boolean(data?.readyToConfirm),
+                  createdOrder: data?.createdOrder || undefined,
+                  pendingOrder: data?.pendingOrder || undefined,
+                  chips: Array.isArray(data?.chips) ? data.chips : undefined,
+                }
+              : m,
+          ),
+        );
       }
-
-      const rawSources = Array.isArray(res?.sources) ? res.sources : [];
-      const sources = rawSources.map((item: any) =>
-        typeof item === 'string' ? item : item?.title || cb.default_doc_title,
-      );
-
-      const botMsg: ChatMessage = {
-        id: 'reply-' + Date.now(),
-        role: 'assistant',
-        text: res?.answer || cb.fallback_response,
-        sources,
-        products: Array.isArray(res?.products) ? res.products : [],
-        readyToConfirm: Boolean(res?.readyToConfirm),
-        createdOrder: res?.createdOrder || undefined,
-        pendingOrder: res?.pendingOrder || undefined,
-      };
-      setMessages((prev) => [...prev, botMsg]);
     } catch (err: any) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: 'err-' + Date.now(),
-          role: 'assistant',
-          text: err?.message || cb.network_error,
-        },
-      ]);
+      if (abortController.signal.aborted) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === replyMsgId
+              ? { ...m, isStreaming: false, text: m.text ? m.text + ' (Đã dừng)' : 'Đã dừng phản hồi.' }
+              : m,
+          ),
+        );
+      } else {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === replyMsgId
+              ? { ...m, isStreaming: false, text: err?.message || cb.network_error }
+              : m,
+          ),
+        );
+      }
     } finally {
       setIsSending(false);
+      setStatusText(null);
+      abortControllerRef.current = null;
     }
   };
 
@@ -595,6 +799,49 @@ export default function ChatbotWidget() {
                         <ExternalLink size={12} />
                       </button>
                     </div>
+
+                    {/* Nút mua kèm phụ kiện ưu đãi hôm nay (Cross-Selling 1-click) */}
+                    <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #bbf7d0' }}>
+                      <div style={{ fontSize: '11px', color: '#15803d', fontWeight: 700, marginBottom: '6px' }}>
+                        Ưu đãi mua kèm độc quyền hôm nay:
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleSend('Thêm vớ thể thao One Athletic')}
+                          style={{
+                            background: '#ffffff',
+                            border: '1px solid #86efac',
+                            borderRadius: '999px',
+                            padding: '4px 10px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            color: '#16a34a',
+                            cursor: 'pointer',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                          }}
+                        >
+                          + Vớ chạy bộ (+49.000đ)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSend('Thêm bình xịt nano')}
+                          style={{
+                            background: '#ffffff',
+                            border: '1px solid #86efac',
+                            borderRadius: '999px',
+                            padding: '4px 10px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            color: '#16a34a',
+                            cursor: 'pointer',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                          }}
+                        >
+                          + Bình xịt nano (+89.000đ)
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -860,6 +1107,40 @@ export default function ChatbotWidget() {
                     </div>
                   </div>
                 )}
+
+                {/* Các chip câu hỏi gợi ý nhanh (Fast Router Chips) */}
+                {!isUser && m.chips && m.chips.length > 0 && !isSending && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '10px' }}>
+                    {m.chips.map((chip, cIdx) => (
+                      <button
+                        key={cIdx}
+                        type="button"
+                        onClick={() => handleSend(chip)}
+                        style={{
+                          background: '#fff1f2',
+                          border: '1px solid #fecdd3',
+                          color: '#e11d48',
+                          borderRadius: '999px',
+                          padding: '3px 9px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = '#ffe4e6';
+                          e.currentTarget.style.borderColor = '#e11d48';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = '#fff1f2';
+                          e.currentTarget.style.borderColor = '#fecdd3';
+                        }}
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -939,7 +1220,78 @@ export default function ChatbotWidget() {
           </div>
         )}
 
-        {/* Form nhập câu hỏi */}
+        {/* Thanh trạng thái xử lý streaming hoặc lỗi giọng nói */}
+        {(statusText || voiceError) && (
+          <div
+            style={{
+              padding: '6px 14px',
+              background: voiceError ? '#fef2f2' : '#f8fafc',
+              borderTop: '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '11.5px',
+              color: voiceError ? '#b91c1c' : '#e11d48',
+              fontWeight: 600,
+            }}
+          >
+            {voiceError ? (
+              <span>{voiceError}</span>
+            ) : (
+              <>
+                <Sparkles size={12} className="animate-spin" />
+                <span>{statusText}</span>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Thanh thu âm giọng nói trực tiếp (Voice Recording Bar) */}
+        {isRecording && (
+          <div
+            style={{
+              padding: '8px 14px',
+              background: '#fef2f2',
+              borderTop: '1.5px solid #f87171',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span
+                style={{
+                  width: '10px',
+                  height: '10px',
+                  borderRadius: '50%',
+                  background: '#ef4444',
+                  boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.2)',
+                }}
+              />
+              <span style={{ fontSize: '12px', fontWeight: 700, color: '#b91c1c' }}>
+                Đang lắng nghe... ({recordingSeconds}s / 15s)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleVoiceToggle}
+              style={{
+                background: '#ef4444',
+                color: '#ffffff',
+                border: 0,
+                borderRadius: '6px',
+                padding: '4px 10px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Hoàn tất
+            </button>
+          </div>
+        )}
+
+        {/* Form nhập câu hỏi & micro */}
         <form
           className="chat-form"
           id="chatForm"
@@ -950,18 +1302,44 @@ export default function ChatbotWidget() {
             gap: '8px',
             background: '#ffffff',
             borderTop: '1px solid #e2e8f0',
+            alignItems: 'center',
           }}
         >
+          {/* Nút bật/tắt Micro thu âm Whisper */}
+          <button
+            type="button"
+            onClick={handleVoiceToggle}
+            disabled={isSending && !isRecording}
+            title={isRecording ? 'Dừng ghi âm' : 'Nói để tìm kiếm (Whisper AI)'}
+            aria-label="Microphone"
+            style={{
+              border: '1px solid ' + (isRecording ? '#ef4444' : '#cbd5e1'),
+              background: isRecording ? '#fee2e2' : '#f8fafc',
+              color: isRecording ? '#ef4444' : '#64748b',
+              borderRadius: '8px',
+              width: '38px',
+              height: '38px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: isSending && !isRecording ? 'not-allowed' : 'pointer',
+              flexShrink: 0,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
+          </button>
+
           <input
             aria-label={cb.send_label}
             autoComplete="off"
             id="chatQuestion"
             maxLength={600}
-            placeholder={cb.input_placeholder}
+            placeholder={isRecording ? 'Đang thu âm qua micro...' : cb.input_placeholder}
             required
             value={inputQuestion}
             onChange={(e) => setInputQuestion(e.target.value)}
-            disabled={isSending}
+            disabled={isSending || isRecording}
             style={{
               flex: 1,
               border: '1px solid #cbd5e1',
@@ -972,26 +1350,55 @@ export default function ChatbotWidget() {
               color: '#0f172a',
             }}
           />
-          <button
-            aria-label={cb.send_label}
-            title={cb.send_label}
-            type="submit"
-            disabled={isSending || !inputQuestion.trim()}
-            style={{
-              border: 0,
-              background: inputQuestion.trim() && !isSending ? '#e11d48' : '#94a3b8',
-              color: '#ffffff',
-              borderRadius: '8px',
-              padding: '0 16px',
-              cursor: inputQuestion.trim() && !isSending ? 'pointer' : 'not-allowed',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'background 0.2s',
-            }}
-          >
-            <Send size={15} />
-          </button>
+
+          {/* Nút Dừng phản hồi khi đang stream HOẶC Nút Gửi câu hỏi */}
+          {isSending ? (
+            <button
+              type="button"
+              onClick={handleStopGeneration}
+              title="Dừng phản hồi"
+              aria-label="Dừng phản hồi"
+              style={{
+                border: 0,
+                background: '#475569',
+                color: '#ffffff',
+                borderRadius: '8px',
+                width: '38px',
+                height: '38px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                transition: 'background 0.2s',
+              }}
+            >
+              <Square size={14} fill="#ffffff" />
+            </button>
+          ) : (
+            <button
+              aria-label={cb.send_label}
+              title={cb.send_label}
+              type="submit"
+              disabled={isSending || !inputQuestion.trim() || isRecording}
+              style={{
+                border: 0,
+                background: inputQuestion.trim() && !isSending ? '#e11d48' : '#94a3b8',
+                color: '#ffffff',
+                borderRadius: '8px',
+                width: '38px',
+                height: '38px',
+                cursor: inputQuestion.trim() && !isSending ? 'pointer' : 'not-allowed',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                transition: 'background 0.2s',
+              }}
+            >
+              <Send size={15} />
+            </button>
+          )}
         </form>
       </section>
     </>

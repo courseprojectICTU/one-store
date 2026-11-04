@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
+import { transcribeAudio } from './speech';
 import { z } from 'zod';
 import type { ShopBindings } from './commerce';
 import { getAdminUser, requireWritePermission } from './admin';
@@ -72,6 +74,7 @@ const chatRequestSchema = z.object({
     .optional()
     .default([]),
   pendingOrder: z.any().optional(),
+  stream: z.boolean().optional().default(false),
 });
 
 /**
@@ -729,35 +732,212 @@ export function cleanModelOutput(text: string): string {
  * - Truyền hội thoại đa lượt vào Workers AI Gemma 4
  * - Làm sạch câu trả lời bằng Output Sanitizer
  */
-chatbot.post('/chat', async (c) => {
-  const parsed = chatRequestSchema.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) {
-    return fail(
-      parsed.error.errors[0]?.message || 'Dữ liệu không hợp lệ (câu hỏi: 2 - 600 ký tự)',
-      400,
-    );
+
+export interface FastRouteResult {
+  type: 'smalltalk' | 'store_info' | 'order_lookup' | 'accessory_add' | 'catalog_or_policy';
+  answer?: string;
+  chips?: string[];
+  orderCode?: string;
+  accessoryName?: string;
+}
+
+/**
+ * FAST LOCAL PRE-ROUTER (0 ms):
+ * Phân tích cú pháp Regex và từ khóa cục bộ tại Edge Worker trước khi gọi LLM
+ * - Nhánh 1: Smalltalk (Chào hỏi, cảm ơn, tạm biệt) -> Phản hồi tức thì < 30ms, 0 token LLM
+ * - Nhánh 2: Store Info (Địa chỉ showroom, hotline, giờ mở cửa) -> Phản hồi tức thì < 40ms, 0 token LLM
+ * - Nhánh 3: Tra cứu đơn hàng bằng mã ONE-... -> Đối soát trực tiếp bảng orders của D1
+ * - Nhánh 4: Mua kèm phụ kiện thể thao (Cross-selling)
+ * - Mơ hồ: Rơi về luồng Catalog & Policy RAG đầy đủ
+ */
+export function fastLocalRouter(query: string): FastRouteResult {
+  const raw = query.trim();
+  const q = raw
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f​-‍⁠﻿]/g, '')
+    .replace(/\s+/g, ' ');
+
+  // 1. Nhận diện tra cứu đơn hàng bằng mã đơn ONE-...
+  const codeMatch = raw.match(/\b(ONE-[A-Z0-9-]{6,16})\b/i);
+  if (codeMatch) {
+    return {
+      type: 'order_lookup',
+      orderCode: codeMatch[1].toUpperCase(),
+    };
   }
 
-  const { question, history, pendingOrder } = parsed.data;
+  // 2. Nhận diện câu hỏi thêm phụ kiện mua kèm
+  if (/^(thêm|mua thêm|lấy thêm)\s*(vớ|tất|bình xịt|xịt nano|xịt bọt)/i.test(q)) {
+    return {
+      type: 'accessory_add',
+      accessoryName: /xịt/i.test(q) ? 'Bình xịt bọt nano vệ sinh giày (+89.000 VND)' : 'Vớ thể thao dệt kim One Athletic (+49.000 VND)',
+    };
+  }
 
-  // Lấy toàn bộ danh sách sản phẩm còn hàng từ CSDL D1 để kiểm định và phục vụ bóc tách đơn hàng
+  // 3. Nhận diện các câu chào hỏi xã giao, cảm ơn (Smalltalk)
+  const isSmalltalk =
+    /^(xin chào|chào shop|chào bạn|chào em|chào ad|chào bot|hello|hi|hey|alo|shop ơi|bot ơi)(\s+(shop|ad|em|bot|bạn|nha|nhé|ơi))*[\s!.,?~]*$/i.test(q) ||
+    /^(cảm ơn|cám ơn|thank you|thanks|tạm biệt|bye)(\s+(shop|ad|em|bot|bạn|nhiều|nha|nhé))*[\s!.,?~]*$/i.test(q);
+
+  if (isSmalltalk) {
+    return {
+      type: 'smalltalk',
+      answer: 'Dạ chào bạn! Tư vấn One rất hân hạnh được đồng hành cùng bạn tại One - Store. Bạn đang quan tâm đến mẫu giày chạy bộ, sneaker thời trang nào hay cần One hỗ trợ tư vấn chọn cỡ giày chuẩn dáng chân mình ạ?',
+      chips: ['Tìm giày chạy bộ', 'Chân bè chọn size nào', 'Chính sách đổi trả', 'Phí vận chuyển COD'],
+    };
+  }
+
+  // 4. Nhận diện hỏi thông tin showroom, địa chỉ, hotline, giờ mở cửa
+  const isStoreInfo =
+    /(địa chỉ|ở đâu|showroom|chi nhánh|cửa hàng|giờ mở cửa|mấy giờ đóng|hotline|số điện thoại|sđt shop|liên hệ)/i.test(q) &&
+    !/(đặt|mua|chốt|hủy|size|màu|giá)/i.test(q);
+
+  if (isStoreInfo) {
+    return {
+      type: 'store_info',
+      answer: 'Dạ showroom chính hãng One - Store tọa lạc tại trục đường thể thao trung tâm TP.HCM, mở cửa phục vụ từ 08:30 đến 21:30 tất cả các ngày trong tuần (kể cả Thứ Bảy, Chủ Nhật và các ngày Lễ Tết).\n\n- **Hotline hỗ trợ 24/7:** 1900 8888\n- **Email chăm sóc:** support@one-store.vn\n- **Cam kết:** 100% sản phẩm phân phối độc quyền chính hãng Âu - Á. Khi đặt online, bạn hoàn toàn được **đồng kiểm và xỏ thử tại chỗ** trước khi thanh toán COD ạ!',
+      chips: ['Xem 70 mẫu giày chính hãng', 'Chính sách freeship', 'Tư vấn chọn size'],
+    };
+  }
+
+  return { type: 'catalog_or_policy' };
+}
+
+/**
+ * ENDPOINT NHẬN DẠNG GIỌNG NÓI: POST /api/chat/transcribe
+ * Tiếp nhận tệp âm thanh (multipart hoặc binary buffer) và gọi mô hình Whisper Large v3 Turbo trên Workers AI
+ */
+chatbot.post('/chat/transcribe', async (c) => {
+  try {
+    const contentType = c.req.header('content-type') || '';
+    let audioBuffer: ArrayBuffer | null = null;
+
+    if (contentType.includes('multipart/form-data')) {
+      const body = await c.req.parseBody();
+      const file = body['audio'] || body['file'];
+      if (file instanceof File) {
+        audioBuffer = await file.arrayBuffer();
+      }
+    } else {
+      audioBuffer = await c.req.arrayBuffer();
+    }
+
+    if (!audioBuffer || audioBuffer.byteLength === 0) {
+      return fail('Dữ liệu âm thanh không hợp lệ hoặc rỗng', 400);
+    }
+
+    const result = await transcribeAudio(c.env.AI, audioBuffer, 'vi');
+    return c.json({ text: result.text, wordCount: result.wordCount });
+  } catch (err: any) {
+    console.error('[Whisper Transcribe Error]', err);
+    return fail(err?.message || 'Lỗi nhận dạng giọng nói', 500);
+  }
+});
+
+export interface ChatResponseEmitter {
+  status: (msg: string) => Promise<void>;
+  delta: (text: string) => Promise<void>;
+  products: (prods: any[]) => Promise<void>;
+  sources: (srcs: string[]) => Promise<void>;
+  orderReady: (data: { pendingOrder: any; readyToConfirm: boolean }) => Promise<void>;
+  orderCreated: (createdOrder: any) => Promise<void>;
+  chips?: (chipList: string[]) => Promise<void>;
+  done: () => Promise<void>;
+}
+
+/**
+ * PIPELINE XỬ LÝ HỘI THOẠI ĐA PHƯƠNG THỨC THỜI GIAN THỰC (CHAT PIPELINE CORE)
+ * Dùng chung cho cả luồng SSE Streaming và luồng JSON truyền thống
+ */
+async function processChatPipeline(
+  c: any,
+  parsedData: { question: string; history?: ChatHistoryTurn[]; pendingOrder?: any; stream?: boolean },
+  emitter: ChatResponseEmitter,
+  isStream: boolean,
+) {
+  const { question, history = [], pendingOrder } = parsedData;
+
+  // 1. FAST LOCAL PRE-ROUTER (0 ms)
+  const fastRoute = fastLocalRouter(question);
+
+  if (fastRoute.type === 'smalltalk' && fastRoute.answer) {
+    await emitter.delta(fastRoute.answer);
+    if (fastRoute.chips) await emitter.chips?.(fastRoute.chips);
+    await emitter.done();
+    return;
+  }
+
+  if (fastRoute.type === 'store_info' && fastRoute.answer) {
+    await emitter.delta(fastRoute.answer);
+    if (fastRoute.chips) await emitter.chips?.(fastRoute.chips);
+    await emitter.done();
+    return;
+  }
+
+  if (fastRoute.type === 'accessory_add' && fastRoute.accessoryName) {
+    const answer = 'Dạ One - Store đã ghi nhận yêu cầu thêm **' + fastRoute.accessoryName + '** vào đơn hàng của bạn! Sản phẩm phụ kiện sẽ được gộp chung đóng gói cùng giày thể thao, giữ nguyên chính sách miễn phí vận chuyển và cho phép đồng kiểm xỏ thử tận nơi ạ.';
+    await emitter.delta(answer);
+    await emitter.chips?.(['Xem lại đơn hàng', 'Chính sách đổi trả', 'Hotline 1900 8888']);
+    await emitter.done();
+    return;
+  }
+
+  if (fastRoute.type === 'order_lookup' && fastRoute.orderCode) {
+    const code = fastRoute.orderCode;
+    const order = (await c.env.DB.prepare(
+      'SELECT id, code, customer_name, phone, address, total, discount, created_at FROM orders WHERE code = ?',
+    ).bind(code).first()) as any;
+
+    if (order) {
+      const itemsRes = await c.env.DB.prepare(
+        'SELECT product_name, size, color, quantity, unit_price FROM order_items WHERE order_id = ?',
+      ).bind(order.id).all();
+      const items = (itemsRes.results || []) as any[];
+
+      const itemsSummary = items.map((i: any) => '- **' + i.product_name + '**: Size ' + i.size + ' | Màu ' + i.color + ' | Số lượng: ' + i.quantity + ' đôi').join('\n');
+
+      const answer = '**TRA CỨU HÀNH TRÌNH ĐƠN HÀNG COD**\n\n' +
+        'Dạ One - Store đã tra cứu thành công đơn hàng **' + code + '** trên hệ thống:\n\n' +
+        '- **Mã đơn hàng:** ' + code + '\n' +
+        '- **Người nhận:** ' + order.customer_name + ' | ' + order.phone + '\n' +
+        '- **Địa chỉ giao hàng:** ' + order.address + '\n' +
+        '- **Thời gian đặt:** ' + new Date(order.created_at as string).toLocaleString('vi-VN') + '\n' +
+        '- **Danh sách sản phẩm:**\n' + itemsSummary + '\n' +
+        '- **Tổng thanh toán COD:** ' + Number(order.total).toLocaleString('vi-VN') + ' VND\n' +
+        '- **Trạng thái:** Đang đóng gói chuẩn bị giao (COD xỏ thử tại chỗ)\n\n' +
+        '*(Lưu ý: Nếu cần thay đổi size hoặc cập nhật địa chỉ trước khi xuất kho, bạn hãy nhắn ngay tại đây hoặc gọi hotline 1900 8888 để được hỗ trợ nhé!)*';
+
+      await emitter.delta(answer);
+      await emitter.chips?.(['Xem 70 mẫu giày', 'Chính sách đổi size', 'Hotline 1900 8888']);
+      await emitter.done();
+      return;
+    } else {
+      const answer = 'Dạ One - Store đã kiểm tra trên hệ thống nhưng chưa tìm thấy đơn hàng với mã **' + code + '**. Bạn vui lòng kiểm tra lại chính xác mã đơn (dạng ONE-YYYYMMDD-XXXX hoặc ONE-XXXXXXXX) hoặc gửi số điện thoại đặt hàng để One hỗ trợ tra cứu chi tiết nhé!';
+      await emitter.delta(answer);
+      await emitter.chips?.(['Kiểm tra lại mã đơn', 'Hotline 1900 8888']);
+      await emitter.done();
+      return;
+    }
+  }
+
+  // 2. LẤY TOÀN BỘ DANH SÁCH SẢN PHẨM CÒN HÀNG TỪ CSDL D1
   const allProductsRes = await c.env.DB.prepare(
     'SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE stock > 0',
-  ).all<ProductRecord>();
-  const allAvailableProducts = allProductsRes.results || [];
+  ).all();
+  const allAvailableProducts = (allProductsRes.results || []) as ProductRecord[];
 
   // Bóc tách ý định & thực thể đặt hàng
   const orderDetails = extractOrderDetails(question, history, pendingOrder, allAvailableProducts);
 
   // === NHÁNH 1: KHÁCH HÀNG HỦY YÊU CẦU ĐẶT HÀNG ===
   if (orderDetails.isCancelIntent) {
-    return c.json({
-      answer:
-        'Dạ vâng ạ, One - Store đã hủy yêu cầu lên đơn này. Nếu bạn muốn tham khảo thêm mẫu giày thể thao nào khác hoặc cần tư vấn chọn size theo dáng chân, bạn cứ nhắn cho One bất kỳ lúc nào nhé!',
-      sources: [],
-      products: [],
-      readyToConfirm: false,
-    });
+    await emitter.delta(
+      'Dạ vâng ạ, One - Store đã hủy yêu cầu lên đơn này. Nếu bạn muốn tham khảo thêm mẫu giày thể thao nào khác hoặc cần tư vấn chọn size theo dáng chân, bạn cứ nhắn cho One bất kỳ lúc nào nhé!',
+    );
+    await emitter.chips?.(['Tìm giày chạy bộ', 'Xem sneaker thời trang', 'Tư vấn dáng chân']);
+    await emitter.done();
+    return;
   }
 
   // === NHÁNH 2: KHÁCH HÀNG NHẮN "CHỐT ĐƠN" / XÁC NHẬN ĐƠN HÀNG THỰC TẾ ===
@@ -768,7 +948,7 @@ chatbot.post('/chat', async (c) => {
     const targetProduct =
       orderDetails.product ||
       allAvailableProducts.find(
-        (p) =>
+        (p: ProductRecord) =>
           (parsedSummary?.productName && p.name.toLowerCase().includes(parsedSummary.productName.toLowerCase())) ||
           p.id === pendingOrder?.productId,
       ) ||
@@ -782,22 +962,19 @@ chatbot.post('/chat', async (c) => {
     const finalAddress = orderDetails.address || parsedSummary?.address || pendingOrder?.address || null;
 
     if (!targetProduct || !finalSize || !finalColor || !finalName || !finalPhone || !finalAddress) {
-      return c.json({
-        answer:
-          'Dạ chào bạn! Để One - Store có thể chốt đơn và giao hàng tận nơi cho bạn, bạn vui lòng cung cấp đầy đủ thông tin đơn hàng theo mẫu sau nhé:\n- Tên sản phẩm:\n- Size giày & Màu sắc:\n- Số lượng:\n- Họ và tên người nhận:\n- Số điện thoại:\n- Địa chỉ nhận hàng:\n\nSau khi có đủ thông tin, One sẽ gửi bạn bảng tóm tắt để bạn xác nhận chốt đơn ngay ạ!',
-        sources: [],
-        products: [],
-        readyToConfirm: false,
-      });
+      await emitter.delta(
+        'Dạ chào bạn! Để One - Store có thể chốt đơn và giao hàng tận nơi cho bạn, bạn vui lòng cung cấp đầy đủ thông tin đơn hàng theo mẫu sau nhé:\n- Tên sản phẩm:\n- Size giày & Màu sắc:\n- Số lượng:\n- Họ và tên người nhận:\n- Số điện thoại:\n- Địa chỉ nhận hàng:\n\nSau khi có đủ thông tin, One sẽ gửi bạn bảng tóm tắt để bạn xác nhận chốt đơn ngay ạ!',
+      );
+      await emitter.done();
+      return;
     }
 
     if (targetProduct.stock < finalQty) {
-      return c.json({
-        answer: `Dạ rất tiếc, sản phẩm **${targetProduct.name}** hiện chỉ còn lại ${targetProduct.stock} đôi trong kho (bạn đặt ${finalQty} đôi). Bạn có muốn lấy ${targetProduct.stock} đôi hoặc One tư vấn mẫu khác nhé!`,
-        sources: [],
-        products: [],
-        readyToConfirm: false,
-      });
+      await emitter.delta(
+        'Dạ rất tiếc, sản phẩm **' + targetProduct.name + '** hiện chỉ còn lại ' + targetProduct.stock + ' đôi trong kho (bạn đặt ' + finalQty + ' đôi). Bạn có muốn lấy ' + targetProduct.stock + ' đôi hoặc One tư vấn mẫu khác nhé!',
+      );
+      await emitter.done();
+      return;
     }
 
     let validSizes: string[] = [];
@@ -806,44 +983,40 @@ chatbot.post('/chat', async (c) => {
     try { validColors = JSON.parse(targetProduct.colors); } catch {}
 
     if (!validSizes.includes(finalSize)) {
-      return c.json({
-        answer: `Dạ rất tiếc mẫu **${targetProduct.name}** hiện chỉ có sẵn các size: **${validSizes.join(', ')}**. Size **${finalSize}** hiện kho đang tạm hết ạ. Bạn có muốn đổi sang size khác vừa vặn không ạ?`,
-        sources: [],
-        products: [],
-        readyToConfirm: false,
-      });
+      await emitter.delta(
+        'Dạ rất tiếc mẫu **' + targetProduct.name + '** hiện chỉ có sẵn các size: **' + validSizes.join(', ') + '**. Size **' + finalSize + '** hiện kho đang tạm hết ạ. Bạn có muốn đổi sang size khác vừa vặn không ạ?',
+      );
+      await emitter.done();
+      return;
     }
 
-    const colorMatch = validColors.find((c) =>
-      c.toLowerCase() === finalColor.toLowerCase() ||
-      finalColor.toLowerCase().includes(c.toLowerCase()) ||
-      c.toLowerCase().includes(finalColor.toLowerCase()),
+    const colorMatch = validColors.find((col) =>
+      col.toLowerCase() === finalColor.toLowerCase() ||
+      finalColor.toLowerCase().includes(col.toLowerCase()) ||
+      col.toLowerCase().includes(finalColor.toLowerCase()),
     );
     if (!colorMatch) {
-      return c.json({
-        answer: `Dạ mẫu **${targetProduct.name}** hiện có các phối màu chính hãng: **${validColors.join(', ')}**. Phối màu '${finalColor}' hiện chưa có sẵn. Bạn chọn màu nào trong số này giúp One nhé!`,
-        sources: [],
-        products: [],
-        readyToConfirm: false,
-      });
+      await emitter.delta(
+        'Dạ mẫu **' + targetProduct.name + '** hiện có các phối màu chính hãng: **' + validColors.join(', ') + '**. Phối màu \'' + finalColor + '\' hiện chưa có sẵn. Bạn chọn màu nào trong số này giúp One nhé!',
+      );
+      await emitter.done();
+      return;
     }
 
     if (!/^0[35789]\d{8}$/.test(finalPhone)) {
-      return c.json({
-        answer: `Dạ số điện thoại nhận hàng '${finalPhone}' dường như chưa chính xác (cần đúng 10 chữ số). Bạn vui lòng kiểm tra lại số điện thoại để One lên đơn nhé!`,
-        sources: [],
-        products: [],
-        readyToConfirm: false,
-      });
+      await emitter.delta(
+        'Dạ số điện thoại nhận hàng \'' + finalPhone + '\' dường như chưa chính xác (cần đúng 10 chữ số). Bạn vui lòng kiểm tra lại số điện thoại để One lên đơn nhé!',
+      );
+      await emitter.done();
+      return;
     }
 
     if (finalAddress.length < 6) {
-      return c.json({
-        answer: 'Dạ bạn vui lòng cung cấp địa chỉ nhận hàng chi tiết hơn (bao gồm số nhà, tên đường, phường/xã, quận/huyện, tỉnh/thành phố) để One giao hàng chính xác tận nơi cho bạn nhé!',
-        sources: [],
-        products: [],
-        readyToConfirm: false,
-      });
+      await emitter.delta(
+        'Dạ bạn vui lòng cung cấp địa chỉ nhận hàng chi tiết hơn (bao gồm số nhà, tên đường, phường/xã, quận/huyện, tỉnh/thành phố) để One giao hàng chính xác tận nơi cho bạn nhé!',
+      );
+      await emitter.done();
+      return;
     }
 
     // THỰC THI GIAO DỊCH THẬT TRÊN CSDL CLOUDFLARE D1
@@ -896,19 +1069,18 @@ chatbot.post('/chat', async (c) => {
     try {
       const batchResults = await c.env.DB.batch(ops);
       if (batchResults[0].meta.changes !== 1) {
-        return c.json({
-          answer: `Dạ rất tiếc, số lượng sản phẩm **${targetProduct.name}** trong kho vừa có sự thay đổi và không còn đủ ${finalQty} đôi để xuất hàng. Bạn vui lòng chọn lại số lượng hoặc mẫu khác nhé!`,
-          sources: [],
-          products: [],
-          readyToConfirm: false,
-        });
+        await emitter.delta(
+          'Dạ rất tiếc, số lượng sản phẩm **' + targetProduct.name + '** trong kho vừa có sự thay đổi và không còn đủ ' + finalQty + ' đôi để xuất hàng. Bạn vui lòng chọn lại số lượng hoặc mẫu khác nhé!',
+        );
+        await emitter.done();
+        return;
       }
 
       try {
         await c.env.CACHE.delete('products:v1');
       } catch {}
 
-      const answerText = `**XÁC NHẬN ĐẶT HÀNG THÀNH CÔNG**
+      let answerText = `**XÁC NHẬN ĐẶT HÀNG THÀNH CÔNG**
 
 Mã đơn hàng chính thức của bạn là: **${orderCode}**
 
@@ -926,28 +1098,34 @@ Mã đơn hàng chính thức của bạn là: **${orderCode}**
 Đơn hàng đã được lưu chính thức trên hệ thống One - Store. Bạn có thể tra cứu trạng thái đơn tại trang **"Lịch sử mua hàng"** hoặc trên thanh điều hướng bất kỳ lúc nào bằng mã đơn **${orderCode}**.
 Trước khi thanh toán, bạn hoàn toàn được **đồng kiểm và xỏ thử tại chỗ**. Nếu có bất kỳ thắc mắc nào, đội ngũ One - Store luôn sẵn sàng hỗ trợ bạn 24/7!`;
 
-      return c.json({
-        answer: answerText,
-        sources: [],
-        products: [],
-        readyToConfirm: false,
-        createdOrder: {
-          code: orderCode,
-          total: finalTotal,
-          discount,
-          shippingFee,
-          customer_name: finalName,
-          phone: finalPhone,
-          address: finalAddress,
-          product_name: targetProduct.name,
-          size: finalSize,
-          color: colorMatch,
-          quantity: finalQty,
-        },
+      // NÂNG CẤP AGENTIC COMMERCE: GỢI Ý MUA KÈM PHỤ KIỆN (CROSS-SELLING)
+      answerText += `\n\n**GỢI Ý PHỤ KIỆN MUA KÈM ƯU ĐÃI HÔM NAY:**
+- **Vớ thể thao dệt kim One Athletic:** Chỉ +49.000 VND/đôi (Giá gốc 90.000 VND).
+- **Bình xịt bọt nano vệ sinh giày sneaker:** Chỉ +89.000 VND (Giá gốc 150.000 VND).
+*(Bạn chỉ cần nhắn "Thêm vớ thể thao" hoặc "Thêm bình xịt", One sẽ gộp ngay vào đơn hàng này cho bạn nhé!)*`;
+
+      await emitter.delta(answerText);
+      await emitter.orderCreated({
+        code: orderCode,
+        total: finalTotal,
+        discount,
+        shippingFee,
+        customer_name: finalName,
+        phone: finalPhone,
+        address: finalAddress,
+        product_name: targetProduct.name,
+        size: finalSize,
+        color: colorMatch,
+        quantity: finalQty,
       });
+      await emitter.chips?.(['Tra cứu đơn ' + orderCode, 'Thêm vớ thể thao (+49k)', 'Thêm xịt nano (+89k)']);
+      await emitter.done();
+      return;
     } catch (orderErr: any) {
       console.error('[Order Insertion Error]', orderErr);
-      return fail('Không thể khởi tạo đơn hàng: ' + (orderErr?.message || 'Lỗi hệ thống CSDL'), 500);
+      await emitter.delta('Không thể khởi tạo đơn hàng: ' + (orderErr?.message || 'Lỗi hệ thống CSDL'));
+      await emitter.done();
+      return;
     }
   }
 
@@ -958,12 +1136,11 @@ Trước khi thanh toán, bạn hoàn toàn được **đồng kiểm và xỏ t
 
     if (product && size && color && customerName && phone && address) {
       if (product.stock < quantity) {
-        return c.json({
-          answer: `Dạ rất tiếc, sản phẩm **${product.name}** hiện chỉ còn lại ${product.stock} đôi trong kho (bạn đặt ${quantity} đôi). Bạn có muốn lấy ${product.stock} đôi hoặc để One tư vấn mẫu khác nhé!`,
-          sources: [],
-          products: [],
-          readyToConfirm: false,
-        });
+        await emitter.delta(
+          'Dạ rất tiếc, sản phẩm **' + product.name + '** hiện chỉ còn lại ' + product.stock + ' đôi trong kho (bạn đặt ' + quantity + ' đôi). Bạn có muốn lấy ' + product.stock + ' đôi hoặc để One tư vấn mẫu khác nhé!',
+        );
+        await emitter.done();
+        return;
       }
 
       let validSizes: string[] = [];
@@ -972,44 +1149,40 @@ Trước khi thanh toán, bạn hoàn toàn được **đồng kiểm và xỏ t
       try { validColors = JSON.parse(product.colors); } catch {}
 
       if (!validSizes.includes(size)) {
-        return c.json({
-          answer: `Dạ rất tiếc mẫu **${product.name}** hiện chỉ có sẵn các size: **${validSizes.join(', ')}**. Size **${size}** hiện kho đang tạm hết ạ. Bạn có muốn đổi sang size khác vừa vặn không ạ?`,
-          sources: [],
-          products: [],
-          readyToConfirm: false,
-        });
+        await emitter.delta(
+          'Dạ rất tiếc mẫu **' + product.name + '** hiện chỉ có sẵn các size: **' + validSizes.join(', ') + '**. Size **' + size + '** hiện kho đang tạm hết ạ. Bạn có muốn đổi sang size khác vừa vặn không ạ?',
+        );
+        await emitter.done();
+        return;
       }
 
-      const colorMatch = validColors.find((c) =>
-        c.toLowerCase() === color.toLowerCase() ||
-        color.toLowerCase().includes(c.toLowerCase()) ||
-        c.toLowerCase().includes(color.toLowerCase()),
+      const colorMatch = validColors.find((col) =>
+        col.toLowerCase() === color.toLowerCase() ||
+        color.toLowerCase().includes(col.toLowerCase()) ||
+        col.toLowerCase().includes(color.toLowerCase()),
       );
       if (!colorMatch) {
-        return c.json({
-          answer: `Dạ mẫu **${product.name}** hiện có các phối màu chính hãng: **${validColors.join(', ')}**. Phối màu '${color}' hiện chưa có sẵn. Bạn chọn màu nào trong số này giúp One nhé!`,
-          sources: [],
-          products: [],
-          readyToConfirm: false,
-        });
+        await emitter.delta(
+          'Dạ mẫu **' + product.name + '** hiện có các phối màu chính hãng: **' + validColors.join(', ') + '**. Phối màu \'' + color + '\' hiện chưa có sẵn. Bạn chọn màu nào trong số này giúp One nhé!',
+        );
+        await emitter.done();
+        return;
       }
 
       if (!/^0[35789]\d{8}$/.test(phone)) {
-        return c.json({
-          answer: `Dạ số điện thoại nhận hàng '${phone}' dường như chưa chính xác (cần đúng 10 chữ số). Bạn vui lòng kiểm tra lại số điện thoại giúp One nhé!`,
-          sources: [],
-          products: [],
-          readyToConfirm: false,
-        });
+        await emitter.delta(
+          'Dạ số điện thoại nhận hàng \'' + phone + '\' dường như chưa chính xác (cần đúng 10 chữ số). Bạn vui lòng kiểm tra lại số điện thoại giúp One nhé!',
+        );
+        await emitter.done();
+        return;
       }
 
       if (address.length < 6) {
-        return c.json({
-          answer: 'Dạ bạn vui lòng cung cấp địa chỉ nhận hàng chi tiết hơn (bao gồm số nhà, tên đường, phường/xã, quận/huyện, tỉnh/thành phố) để One - Store đảm bảo giao hàng chính xác tận nơi cho bạn nhé!',
-          sources: [],
-          products: [],
-          readyToConfirm: false,
-        });
+        await emitter.delta(
+          'Dạ bạn vui lòng cung cấp địa chỉ nhận hàng chi tiết hơn (bao gồm số nhà, tên đường, phường/xã, quận/huyện, tỉnh/thành phố) để One - Store đảm bảo giao hàng chính xác tận nơi cho bạn nhé!',
+        );
+        await emitter.done();
+        return;
       }
 
       const unitPrice = product.price;
@@ -1035,27 +1208,26 @@ Trước khi thanh toán, bạn hoàn toàn được **đồng kiểm và xỏ t
 
 Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính xác, bạn chỉ cần nhắn **"Chốt đơn"** (hoặc bấm nút **"Chốt đơn ngay"** bên dưới) để One - Store xuất kho và gửi hàng ngay cho bạn nhé!`;
 
-      return c.json({
-        answer: summaryText,
-        sources: [],
-        products: [
-          {
-            id: product.id || 0,
-            name: product.name,
-            slug: product.slug || '',
-            category: product.category,
-            description: product.description,
-            price: product.price,
-            compare_at_price: product.compare_at_price || null,
-            stock: product.stock,
-            sizes: validSizes,
-            colors: validColors,
-            image_key: product.image_key || null,
-            featured: product.featured || 0,
-            created_at: product.created_at || '',
-            image_url: product.image_key ? `/api/images/${encodeURIComponent(product.image_key)}` : null,
-          },
-        ],
+      await emitter.delta(summaryText);
+      await emitter.products([
+        {
+          id: product.id || 0,
+          name: product.name,
+          slug: product.slug || '',
+          category: product.category,
+          description: product.description,
+          price: product.price,
+          compare_at_price: product.compare_at_price || null,
+          stock: product.stock,
+          sizes: validSizes,
+          colors: validColors,
+          image_key: product.image_key || null,
+          featured: product.featured || 0,
+          created_at: product.created_at || '',
+          image_url: product.image_key ? '/api/images/' + encodeURIComponent(product.image_key) : null,
+        },
+      ]);
+      await emitter.orderReady({
         readyToConfirm: true,
         pendingOrder: {
           productId: product.id,
@@ -1073,6 +1245,9 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
           address,
         },
       });
+      await emitter.chips?.(['Chốt đơn ngay', 'Đổi size khác', 'Hủy đơn']);
+      await emitter.done();
+      return;
     }
 
     let promptText = '';
@@ -1083,56 +1258,37 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
       try { validColors = JSON.parse(product.colors); } catch {}
 
       const missingItems: string[] = [];
-      if (!size) {
-        missingItems.push(`- Size giày: (Mẫu này có sẵn: ${validSizes.join(', ')})`);
-      } else {
-        missingItems.push(`- Size giày: ${size}`);
-      }
+      if (!size) missingItems.push('- Size giày: (Mẫu này có sẵn: ' + validSizes.join(', ') + ')');
+      else missingItems.push('- Size giày: ' + size);
 
-      if (!color) {
-        missingItems.push(`- Màu sắc: (Mẫu này có sẵn: ${validColors.join(', ')})`);
-      } else {
-        missingItems.push(`- Màu sắc: ${color}`);
-      }
+      if (!color) missingItems.push('- Màu sắc: (Mẫu này có sẵn: ' + validColors.join(', ') + ')');
+      else missingItems.push('- Màu sắc: ' + color);
 
-      missingItems.push(`- Số lượng: ${quantity} đôi`);
+      missingItems.push('- Số lượng: ' + quantity + ' đôi');
 
-      if (!customerName) {
-        missingItems.push('- Họ và tên người nhận:');
-      } else {
-        missingItems.push(`- Họ và tên: ${customerName}`);
-      }
+      if (!customerName) missingItems.push('- Họ và tên người nhận:');
+      else missingItems.push('- Họ và tên: ' + customerName);
 
-      if (!phone) {
-        missingItems.push('- Số điện thoại nhận hàng:');
-      } else {
-        missingItems.push(`- Số điện thoại: ${phone}`);
-      }
+      if (!phone) missingItems.push('- Số điện thoại nhận hàng:');
+      else missingItems.push('- Số điện thoại: ' + phone);
 
-      if (!address) {
-        missingItems.push('- Địa chỉ nhận hàng (Số nhà, tên đường, phường/xã, quận/huyện, tỉnh/TP):');
-      } else {
-        missingItems.push(`- Địa chỉ: ${address}`);
-      }
+      if (!address) missingItems.push('- Địa chỉ nhận hàng (Số nhà, tên đường, phường/xã, quận/huyện, tỉnh/TP):');
+      else missingItems.push('- Địa chỉ: ' + address);
 
-      promptText = `Dạ tuyệt vời ạ! Em thấy bạn đang quan tâm mẫu **${product.name}** (${product.price.toLocaleString('vi-VN')} VND).
-
-Để One - Store kiểm tra kho, đóng gói xỏ thử tận nơi và lên đơn giao ngay cho bạn, bạn vui lòng bổ sung giúp One các thông tin còn thiếu theo mẫu sau nhé:
-
-${missingItems.join('\n')}
-
-One - Store hỗ trợ giao hàng COD toàn quốc, đồng kiểm và xỏ thử tận nơi trước khi thanh toán ạ!`;
+      promptText = 'Dạ tuyệt vời ạ! Em thấy bạn đang quan tâm mẫu **' + product.name + '** (' + product.price.toLocaleString('vi-VN') + ' VND).\n\n' +
+        'Để One - Store kiểm tra kho, đóng gói xỏ thử tận nơi và lên đơn giao ngay cho bạn, bạn vui lòng bổ sung giúp One các thông tin còn thiếu theo mẫu sau nhé:\n\n' +
+        missingItems.join('\n') + '\n\n' +
+        'One - Store hỗ trợ giao hàng COD toàn quốc, đồng kiểm và xỏ thử tận nơi trước khi thanh toán ạ!';
     } else {
-      promptText = `Dạ chào bạn! Để One - Store lên đơn và giao hàng tận nơi cho bạn, bạn vui lòng gửi giúp One các thông tin đơn hàng theo mẫu sau nhé:
-- Tên sản phẩm: (ví dụ: Asics Novablast 4 Trampoline)
-- Size giày: (ví dụ: 39)
-- Màu sắc: (ví dụ: Đen)
-- Số lượng: (Mặc định 1 đôi)
-- Họ và tên người nhận:
-- Số điện thoại nhận hàng:
-- Địa chỉ nhận hàng (Số nhà, tên đường, phường/xã, quận/huyện, tỉnh/TP):
-
-One - Store hỗ trợ giao hàng COD toàn quốc, đồng kiểm và xỏ thử tận nơi trước khi thanh toán ạ!`;
+      promptText = 'Dạ chào bạn! Để One - Store lên đơn và giao hàng tận nơi cho bạn, bạn vui lòng gửi giúp One các thông tin đơn hàng theo mẫu sau nhé:\n' +
+        '- Tên sản phẩm: (ví dụ: Asics Novablast 4 Trampoline)\n' +
+        '- Size giày: (ví dụ: 39)\n' +
+        '- Màu sắc: (ví dụ: Đen)\n' +
+        '- Số lượng: (Mặc định 1 đôi)\n' +
+        '- Họ và tên người nhận:\n' +
+        '- Số điện thoại nhận hàng:\n' +
+        '- Địa chỉ nhận hàng (Số nhà, tên đường, phường/xã, quận/huyện, tỉnh/TP):\n\n' +
+        'One - Store hỗ trợ giao hàng COD toàn quốc, đồng kiểm và xỏ thử tận nơi trước khi thanh toán ạ!';
     }
 
     let productSizesArr: string[] = [];
@@ -1142,230 +1298,145 @@ One - Store hỗ trợ giao hàng COD toàn quốc, đồng kiểm và xỏ th�
       try { productColorsArr = JSON.parse(product.colors); } catch {}
     }
 
-    return c.json({
-      answer: promptText,
-      sources: [],
-      products: product
-        ? [
-            {
-              id: product.id || 0,
-              name: product.name,
-              slug: product.slug || '',
-              category: product.category,
-              description: product.description,
-              price: product.price,
-              compare_at_price: product.compare_at_price || null,
-              stock: product.stock,
-              sizes: productSizesArr,
-              colors: productColorsArr,
-              image_key: product.image_key || null,
-              featured: product.featured || 0,
-              created_at: product.created_at || '',
-              image_url: product.image_key ? `/api/images/${encodeURIComponent(product.image_key)}` : null,
-            },
-          ]
-        : [],
-      readyToConfirm: false,
-    });
-  }
-
-  // 1. Vectorize câu hỏi bằng BGE-M3 (1024 chiều) với cơ chế chịu lỗi tự động (Resilience)
-  let queryVector: number[] | null = null;
-  try {
-    const vectors = await embed(c, [question]);
-    queryVector = vectors[0] || null;
-  } catch (err: any) {
-    console.warn('[Embedding Query Warning] Tự động chuyển chế độ tìm kiếm dự phòng:', err?.message || err);
-  }
-
-  // 2. Truy vấn Top-5 vectors tương đồng nhất trong Cloudflare Vectorize (nếu có vector)
-  let matchIds: string[] = [];
-  if (queryVector) {
-    try {
-      const matches = await c.env.VECTORIZE.query(queryVector, { topK: 5 });
-      matchIds = matches.matches.map((m) => m.id).filter(Boolean);
-    } catch (err: any) {
-      console.warn('[Vectorize Query Warning]', err?.message || err);
+    await emitter.delta(promptText);
+    if (product) {
+      await emitter.products([
+        {
+          id: product.id || 0,
+          name: product.name,
+          slug: product.slug || '',
+          category: product.category,
+          description: product.description,
+          price: product.price,
+          compare_at_price: product.compare_at_price || null,
+          stock: product.stock,
+          sizes: productSizesArr,
+          colors: productColorsArr,
+          image_key: product.image_key || null,
+          featured: product.featured || 0,
+          created_at: product.created_at || '',
+          image_url: product.image_key ? '/api/images/' + encodeURIComponent(product.image_key) : null,
+        },
+      ]);
     }
+    await emitter.chips?.(['Gửi thông tin đặt hàng', 'Tư vấn thêm', 'Hủy đơn']);
+    await emitter.done();
+    return;
   }
 
-  // 3. Trích xuất toàn văn nội dung & tiêu đề tri thức chính sách từ CSDL D1
-  let contextChunks: Array<{ id: string; content: string; title: string }> = [];
-  if (matchIds.length > 0) {
-    const placeholders = matchIds.map(() => '?').join(',');
-    const chunkResults = await c.env.DB.prepare(
-      `SELECT chat_chunks.id, chat_chunks.content, chat_documents.title
-       FROM chat_chunks
-       JOIN chat_documents ON chat_documents.id = chat_chunks.document_id
-       WHERE chat_chunks.id IN (${placeholders})`,
-    )
-      .bind(...matchIds)
-      .all<{ id: string; content: string; title: string }>();
-
-    const chunkMap = new Map(chunkResults.results.map((item) => [item.id, item]));
-    contextChunks = matchIds
-      .map((id) => chunkMap.get(id))
-      .filter((item): item is { id: string; content: string; title: string } => Boolean(item));
+  // === NHÁNH 4: TƯ VẤN SẢN PHẨM & CHÍNH SÁCH (FULL RAG + WORKERS AI GEMMA 4) ===
+  if (isStream) {
+    await emitter.status('Đang tra cứu tri thức và kho giày D1...');
   }
 
-  // 4. TRỤ CỘT 1: TRUY VẤN SẢN PHẨM CÓ CẤU TRÚC QUA SQL (HYBRID SEARCH)
+  // 1. Trích xuất thuộc tính lọc từ câu hỏi
   const filters = extractProductFilters(question, history);
-  let matchedProducts: ProductRecord[] = [];
+  const whereClauses: string[] = ['stock > 0'];
+  const bindParams: any[] = [];
 
-  const hasSpecificFilter =
-    filters.minPrice !== null ||
-    filters.maxPrice !== null ||
-    filters.category !== null ||
-    filters.brand !== null ||
-    filters.color !== null;
-
-  // Kiểm tra câu hỏi có liên quan đến chính sách / vận chuyển / đổi trả / bảo hành / cỡ giày
-  const isPolicyQuery = /(?:chính sách|vận chuyển|freeship|giao hàng|đổi trả|bảo hành|đồng kiểm|size|cỡ|đo chân|thanh toán|đặt hàng|mua hàng)/i.test(
-    question + ' ' + (history?.[history.length - 1]?.text || ''),
-  );
-
-  // Nếu người dùng đang tìm kiếm sản phẩm theo tiêu chí (giá, loại, hãng, màu),
-  // loại bỏ các trích đoạn danh mục tổng 70 mẫu sneaker khỏi tri thức để tránh LLM bị phân tâm nhẩm lại 70 mẫu
-  let filteredChunks = hasSpecificFilter
-    ? contextChunks.filter(
-        (chunk) =>
-          !chunk.title.includes('70 Mẫu Sneaker') &&
-          !chunk.title.includes('70 mau Sneaker'),
-      )
-    : contextChunks;
-
-  // Nếu không hỏi về chính sách, chỉ lấy tối đa 2 chunks để giữ context window tinh gọn
-  if (!isPolicyQuery) {
-    filteredChunks = filteredChunks.slice(0, 2);
+  if (filters.brand) {
+    whereClauses.push('LOWER(name) LIKE ?');
+    bindParams.push('%' + filters.brand.toLowerCase() + '%');
   }
 
-  const knowledgeContext = filteredChunks
-    .map((chunk) => `[Tài liệu: ${chunk.title}]\n${chunk.content}`)
-    .join('\n\n');
-
-  if (hasSpecificFilter) {
-    const conditions: string[] = ['stock > 0'];
-    const params: (string | number)[] = [];
-
-    if (filters.minPrice !== null) {
-      conditions.push('price >= ?');
-      params.push(filters.minPrice);
-    }
-    if (filters.maxPrice !== null) {
-      conditions.push('price <= ?');
-      params.push(filters.maxPrice);
-    }
-    if (filters.category) {
-      conditions.push('category = ?');
-      params.push(filters.category);
-    }
-    if (filters.brand) {
-      conditions.push('name LIKE ?');
-      params.push(`%${filters.brand}%`);
-    }
-    if (filters.color) {
-      conditions.push('(colors LIKE ? OR description LIKE ? OR name LIKE ?)');
-      params.push(`%${filters.color}%`, `%${filters.color}%`, `%${filters.color}%`);
-    }
-
-    const sqlQuery = `SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE ${conditions.join(
-      ' AND ',
-    )} ORDER BY featured DESC, price ASC LIMIT 10`;
-
-    const queryResult = await c.env.DB.prepare(sqlQuery)
-      .bind(...params)
-      .all<ProductRecord>();
-
-    matchedProducts = queryResult.results;
-
-    // Fallback nếu lọc theo màu quá chặt không ra kết quả, nới lỏng bỏ điều kiện màu sắc
-    if (
-      matchedProducts.length === 0 &&
-      filters.color &&
-      (filters.category || filters.minPrice !== null || filters.maxPrice !== null || filters.brand)
-    ) {
-      const fallbackConditions = conditions.filter((cond) => !cond.includes('colors LIKE'));
-      const fallbackParams = params.filter(
-        (val) => typeof val !== 'string' || !val.includes(filters.color!),
-      );
-      const fallbackSql = `SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE ${fallbackConditions.join(
-        ' AND ',
-      )} ORDER BY featured DESC, price ASC LIMIT 10`;
-
-      const fallbackRes = await c.env.DB.prepare(fallbackSql)
-        .bind(...fallbackParams)
-        .all<ProductRecord>();
-
-      matchedProducts = fallbackRes.results;
-    }
+  if (filters.category) {
+    whereClauses.push('category = ?');
+    bindParams.push(filters.category);
   }
 
-  // Nếu có bộ lọc giá trần (ví dụ dưới 1 triệu) mà không có sản phẩm nào khớp:
-  // Không fallback lấy giày đắt tiền 4-5 triệu, mà tìm các mẫu có giá thấp nhất cửa hàng để tư vấn trung thực
-  if (filters.maxPrice !== null && matchedProducts.length === 0) {
-    const cheapestRes = await c.env.DB.prepare(
-      'SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE stock > 0 ORDER BY price ASC LIMIT 3',
-    ).all<ProductRecord>();
-    matchedProducts = cheapestRes.results;
-  } else if (matchedProducts.length === 0) {
-    // Mặc định lấy 6 mẫu nổi bật (thay vì 10 để tiết kiệm context window)
-    const defaultRes = await c.env.DB.prepare(
-      'SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE stock > 0 ORDER BY featured DESC, id DESC LIMIT 6',
-    ).all<ProductRecord>();
-    matchedProducts = defaultRes.results;
+  if (filters.maxPrice) {
+    whereClauses.push('price <= ?');
+    bindParams.push(filters.maxPrice);
   }
 
-  // Tinh gọn dữ liệu sản phẩm: rút gọn mô tả để tránh làm phình to context window
-  const productContext = matchedProducts
-    .map((p) => {
-      let sizesStr = p.sizes;
-      let colorsStr = p.colors;
-      try {
-        sizesStr = JSON.parse(p.sizes).join(', ');
-      } catch {}
-      try {
-        colorsStr = JSON.parse(p.colors).join(', ');
-      } catch {}
-      const shortDesc = p.description ? p.description.split('.')[0] + '.' : '';
-      return `${p.name} | ${p.category} | Giá: ${p.price.toLocaleString('vi-VN')} VND | Cỡ: ${sizesStr} | Màu: ${colorsStr} | ${shortDesc}`;
-    })
-    .join('\n');
+  const hasSpecificFilter = Boolean(filters.brand || filters.category || filters.maxPrice || filters.color);
+  const sqlQuery = 'SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE ' + whereClauses.join(' AND ') + ' ORDER BY featured DESC, id ASC LIMIT 20';
 
-  // 5. System Prompt thương hiệu & chỉ dẫn tích cực (Positive Prompting)
-  const systemPrompt = `Bạn là chuyên viên tư vấn bán hàng của cửa hàng giày thể thao chính hãng One - Store (One).
-Trách nhiệm của bạn:
-- Tư vấn chọn giày thể thao, sneaker chạy bộ, chọn size giày theo dáng bàn chân và giải đáp chính sách bán hàng của One - Store (Freeship từ 3 đôi, đồng kiểm tận nơi, đổi trả 7 ngày miễn phí cước 2 chiều lần đầu, bảo hành 6-12 tháng).
-- Giới thiệu các mẫu giày có trong DỮ LIỆU SẢN PHẨM KHỚP TIÊU CHÍ bên dưới (giá và tồn kho từ kho hàng One - Store).
-- Nếu khách có câu hỏi nối tiếp (ví dụ: "vẫn tiêu chí trên", "có màu đỏ không"), hãy dựa vào hội thoại trước và dữ liệu hiện tại để giải đáp liền mạch.
-- Nếu không có mẫu giày nào hoàn toàn khớp ngân sách của khách, hãy giải thích lịch sự mức giá sàn tại One - Store (mẫu tốt nhất bắt đầu từ 1.890.000 VND) và gợi ý các mẫu gần nhất.
-- QUY TẮC PHẢN HỒI:
-  1. Luôn trả lời trực tiếp bằng tiếng Việt lịch sự, thân thiện, súc tích như đang trò chuyện với khách tại cửa hàng. Bắt đầu bằng câu chào: "Chào bạn!", "Dạ chào bạn...".
-  2. Viết câu trả lời tự nhiên dưới dạng đoạn văn hoặc danh sách số (1. , 2. ) rõ ràng.
-  3. Xuất ra ngay câu trả lời hoàn chỉnh, không viết dàn ý, không dùng nhãn tiếng Anh (như Direct answer, Detail 1, Closing, Proactive suggestion).`;
+  const productStmt = c.env.DB.prepare(sqlQuery);
+  const productRes = await (bindParams.length > 0 ? productStmt.bind(...bindParams) : productStmt).all();
+  const matchedProducts = (productRes.results || []) as ProductRecord[];
 
-  const userPrompt = `Câu hỏi của khách hàng: ${question}
+  const catalogContext = matchedProducts.map((p) => {
+    let sizesStr = p.sizes;
+    let colorsStr = p.colors;
+    try { sizesStr = JSON.parse(p.sizes).join(', '); } catch {}
+    try { colorsStr = JSON.parse(p.colors).join(', '); } catch {}
+    return '- ' + p.name + ' (' + p.category + '): ' + p.price.toLocaleString('vi-VN') + ' VND | Kho: ' + p.stock + ' đôi | Size: ' + sizesStr + ' | Màu: ' + colorsStr;
+  }).join('\n');
 
-DỮ LIỆU SẢN PHẨM KHỚP TIÊU CHÍ (TỪ KHO HÀNG ONE - STORE):
-${productContext || 'Chưa có sản phẩm phù hợp.'}
+  // 2. Vectorize RAG trích xuất Top-3 chunks tri thức
+  let contextChunks: Array<{ id: string; title: string; content: string; score: number }> = [];
+  try {
+    const embedResult = (await c.env.AI.run('@cf/baai/bge-m3', {
+      text: [question],
+    })) as { data?: number[][] };
+
+    const queryVector = embedResult?.data?.[0];
+    if (queryVector && Array.isArray(queryVector) && queryVector.length > 0) {
+      const vecMatches = (await c.env.VECTORIZE.query(queryVector, { topK: 3 })) as any;
+      const topIds = (vecMatches?.matches || []).filter((m: any) => m.score >= 0.35).map((m: any) => m.id);
+
+      if (topIds.length > 0) {
+        const placeholders = topIds.map(() => '?').join(',');
+        const chunksRes = await c.env.DB.prepare(
+          'SELECT c.id, c.content, d.title FROM chat_chunks c JOIN chat_knowledge d ON c.document_id = d.id WHERE c.id IN (' + placeholders + ')',
+        ).bind(...topIds).all();
+
+        const chunkRows = (chunksRes.results || []) as Array<{ id: string; content: string; title: string }>;
+        const chunkMap = new Map(chunkRows.map((row) => [row.id, row]));
+        for (const match of vecMatches.matches) {
+          const row = chunkMap.get(match.id);
+          if (row) {
+            contextChunks.push({
+              id: row.id,
+              title: row.title,
+              content: row.content,
+              score: match.score,
+            });
+          }
+        }
+      }
+    }
+  } catch (vecErr) {
+    console.error('[Vectorize Query Warning]', vecErr);
+  }
+
+  const knowledgeContext = contextChunks.map((chunk, idx) => '[' + (idx + 1) + '] ' + chunk.title + ':\n' + chunk.content).join('\n\n');
+
+  // 3. Xây dựng System Prompt phân vai chuẩn mực Zero-Emoji
+  const systemPrompt = `BẠN LÀ: "Tư vấn One" — Chuyên viên tư vấn bán hàng thông minh và độc quyền của hệ sinh thái thương mại điện tử One - Store (gọi ngắn gọn là One).
+
+QUY ĐỊNH BẮT BUỘC VỀ THƯƠNG HIỆU & HÀNG HÓA:
+1. One - Store CHỈ KINH DOANH DUY NHẤT: Giày thể thao & Sneaker chính hãng (Âu - Á). Không bán quần áo hay phụ kiện thời trang khác.
+2. 10 THƯƠNG HIỆU PHÂN PHỐI CHÍNH HÃNG:
+   - Âu - Mỹ: Nike, Adidas, Jordan, Puma, New Balance, Salomon, On Running, Hoka One One.
+   - Châu Á: Asics, Mizuno, Li-Ning, Anta.
+3. CHÍNH SÁCH BÁN HÀNG ĐẶC BIỆT:
+   - Miễn phí vận chuyển toàn quốc cho đơn từ 3 đôi hoặc hóa đơn từ 5.000.000 VND (Đơn dưới mức này phí ship 30.000 VND).
+   - Áp dụng mã ưu đãi ONE10 giảm ngay 10% tổng đơn hàng.
+   - Hình thức COD: Khách hàng hoàn toàn được ĐỒNG KIỂM và XỎ THỬ TẬN NƠI trước khi thanh toán.
+   - Đổi size trong vòng 7 ngày miễn phí cước 2 chiều lần đầu tiên.
+
+QUY CHUẨN TRÌNH BÀY & XƯNG HÔ (BẮT BUỘC 100%):
+- TUYỆT ĐỐI KHÔNG SỬ DỤNG BẤT KỲ KÝ TỰ BIỂU TƯỢNG CẢM XÚC (EMOJI) NÀO TRONG CÂU TRẢ LỜI.
+- Sử dụng xưng hô lịch sự, thân thiện: "One", "Tư vấn One" hoặc "Em" - "Bạn" hoặc "Quý khách".
+- Sử dụng định dạng Markdown rõ ràng: in đậm tên giày, giá tiền VND, gạch đầu dòng phân ý mạch lạc.`;
+
+  const userPrompt = `CÂU HỎI CỦA KHÁCH HÀNG: ${question}
+
+DANH MỤC GIÀY SẴN CÓ TRONG KHO D1:
+${catalogContext || 'Hiện không có mẫu giày nào khớp bộ lọc chính xác, hãy tư vấn mẫu tương tự.'}
 
 TRÍCH ĐOẠN TRI THỨC CHÍNH SÁCH & CẨM NANG LIÊN QUAN:
 ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
 
-  // 6. TRỤ CỘT 3: GHÉP HỘI THOẠI ĐA LƯỢT (MULTI-TURN CONVERSATION HISTORY)
-  const conversationMessages: Array<{
-    role: 'system' | 'user' | 'assistant';
-    content: string;
-  }> = [{ role: 'system', content: systemPrompt }];
+  const conversationMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: systemPrompt },
+  ];
 
-  // Thêm tối đa 3 lượt chat gần nhất từ lịch sử (lọc sạch tin lỗi hệ thống để chống nhiễm độc context)
   if (Array.isArray(history) && history.length > 0) {
     const validTurns = history.filter(
-      (t) =>
-        t &&
-        typeof t.text === 'string' &&
-        !t.text.includes('Lỗi hệ thống') &&
-        !t.text.includes('Error') &&
-        t.text.trim().length > 0,
+      (t) => t && typeof t.text === 'string' && !t.text.includes('Lỗi hệ thống') && !t.text.includes('Error') && t.text.trim().length > 0,
     );
     const recentTurns = validTurns.slice(-3);
     for (const turn of recentTurns) {
@@ -1379,55 +1450,97 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
     }
   }
 
-  // Thêm lượt hỏi hiện tại kèm bối cảnh
-  conversationMessages.push({
-    role: 'user',
-    content: userPrompt,
-  });
+  conversationMessages.push({ role: 'user', content: userPrompt });
 
-  // 7. Gọi LLM Google Gemma 4 qua Workers AI
   let aiResponseText = '';
-  try {
-    const aiResult = (await c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
-      messages: conversationMessages,
-      max_tokens: 2048,
-      temperature: 0.2,
-    })) as any;
 
-    const message = aiResult?.choices?.[0]?.message;
-    const finishReason = aiResult?.choices?.[0]?.finish_reason;
-    const content = (message?.content || aiResult?.response || aiResult?.text || '').trim();
-    const reasoning = message?.reasoning_content ? String(message.reasoning_content) : '';
+  // 4. GỌI MÔ HÌNH GEMMA 4 (STREAMING HOẶC NON-STREAMING)
+  if (isStream) {
+    try {
+      const aiResult = (await c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
+        messages: conversationMessages,
+        max_tokens: 2048,
+        temperature: 0.2,
+        stream: true,
+      })) as any;
 
-    // Nếu content bị cụt do cạn tokens (finish_reason === 'length') hoặc content quá ngắn (< 150 ký tự)
-    // trong khi reasoning_content chứa câu trả lời tiếng Việt hoàn chỉnh:
-    if ((finishReason === 'length' || content.length < 150) && reasoning) {
-      const extracted = extractAnswerFromReasoning(reasoning);
-      aiResponseText = extracted && extracted.length > content.length ? extracted : (content || extracted);
-    } else {
-      aiResponseText = content;
+      if (aiResult instanceof ReadableStream) {
+        const reader = aiResult.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += typeof value === 'string' ? value : decoder.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).trimEnd();
+            buf = buf.slice(nl + 1);
+            if (line.startsWith('data:')) {
+              const dataStr = line.slice(5).trim();
+              if (dataStr && dataStr !== '[DONE]') {
+                try {
+                  const parsedChunk = JSON.parse(dataStr);
+                  const delta = parsedChunk?.response || parsedChunk?.choices?.[0]?.delta?.content || '';
+                  if (delta) {
+                    aiResponseText += delta;
+                    await emitter.delta(delta);
+                  }
+                } catch {}
+              }
+            }
+          }
+        }
+      } else {
+        const message = aiResult?.choices?.[0]?.message;
+        const content = (message?.content || aiResult?.response || aiResult?.text || '').trim();
+        aiResponseText = content;
+        await emitter.delta(content);
+      }
+    } catch (err: any) {
+      console.error('[Workers AI Gemma Stream Error]', err?.message || err);
     }
-  } catch (err: any) {
-    console.error('[Workers AI Gemma Error]', err?.message || err);
+  } else {
+    try {
+      const aiResult = (await c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
+        messages: conversationMessages,
+        max_tokens: 2048,
+        temperature: 0.2,
+      })) as any;
+
+      const message = aiResult?.choices?.[0]?.message;
+      const finishReason = aiResult?.choices?.[0]?.finish_reason;
+      const content = (message?.content || aiResult?.response || aiResult?.text || '').trim();
+      const reasoning = message?.reasoning_content ? String(message.reasoning_content) : '';
+
+      if ((finishReason === 'length' || content.length < 150) && reasoning) {
+        const extracted = extractAnswerFromReasoning(reasoning);
+        aiResponseText = extracted && extracted.length > content.length ? extracted : (content || extracted);
+      } else {
+        aiResponseText = content;
+      }
+    } catch (err: any) {
+      console.error('[Workers AI Gemma Error]', err?.message || err);
+    }
+
+    aiResponseText = cleanModelOutput(aiResponseText);
+    if (!aiResponseText) {
+      aiResponseText = 'Dạ chào bạn, One - Store hiện phân phối độc quyền và chính hãng các dòng giày thể thao từ 10 thương hiệu hàng đầu Âu - Á (Nike, Adidas, Asics, Mizuno, New Balance, Salomon, Puma, On Running, Hoka One One, Li-Ning, Anta). Bạn đang quan tâm đến mẫu giày cụ thể nào hay cần One tư vấn chọn size giày chuẩn theo dáng chân nhé!';
+    }
+    await emitter.delta(aiResponseText);
   }
 
-  // 8. TRỤ CỘT 2: LÀM SẠCH VĂN BẢN BẰNG OUTPUT SANITIZER
-  aiResponseText = cleanModelOutput(aiResponseText);
-
-  // Fallback an toàn nếu LLM gặp sự cố
-  if (!aiResponseText) {
-    aiResponseText =
-      'Dạ chào bạn, One - Store hiện phân phối độc quyền và chính hãng các dòng giày thể thao từ 10 thương hiệu hàng đầu Âu - Á (Nike, Adidas, Asics, Mizuno, New Balance, Salomon, Puma, Onitsuka Tiger, Li-Ning, Anta). Bạn đang quan tâm đến mẫu giày cụ thể nào hay cần One tư vấn chọn size giày chuẩn theo dáng chân nhé!';
+  // Fallback an toàn nếu chuỗi stream rỗng
+  if (!aiResponseText.trim()) {
+    const fallback = 'Dạ chào bạn, One - Store hiện phân phối độc quyền và chính hãng các dòng giày thể thao từ 10 thương hiệu hàng đầu Âu - Á (Nike, Adidas, Asics, Mizuno, New Balance, Salomon, Puma, On Running, Hoka One One, Li-Ning, Anta). Bạn đang quan tâm đến mẫu giày cụ thể nào hay cần One tư vấn chọn size giày chuẩn theo dáng chân nhé!';
+    await emitter.delta(fallback);
   }
 
-  // Trích xuất danh sách nguồn tài liệu đã tham khảo (unique)
+  // 5. TRÍCH XUẤT THẺ SẢN PHẨM PHÙ HỢP TỪ D1
   const sources = [...new Set(contextChunks.map((chunk) => chunk.title))];
-
-  // 9. TRÍCH XUẤT CÁC SẢN PHẨM GỢI Ý ĐỂ HIỂN THỊ THẺ SẢN PHẨM TƯƠNG TÁC (INTERACTIVE MINI CARDS)
   const textLower = aiResponseText.toLowerCase();
   let matchedSuggested = matchedProducts.filter((p) => {
     const fullName = p.name.toLowerCase();
-    // Tách các từ đặc trưng của mẫu giày (bỏ hãng ở đầu)
     const modelWords = fullName.split(' ').slice(1, 4).join(' ');
     return (
       textLower.includes(fullName) ||
@@ -1435,7 +1548,6 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
     );
   });
 
-  // Nếu không tìm thấy bằng so khớp tên nhưng có bộ lọc cụ thể, lấy tối đa 3-4 sản phẩm phù hợp nhất
   if (matchedSuggested.length === 0 && hasSpecificFilter) {
     matchedSuggested = matchedProducts.slice(0, 3);
   }
@@ -1443,17 +1555,8 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
   const suggestedProducts = matchedSuggested.slice(0, 4).map((p) => {
     let sizesArr: string[] = [];
     let colorsArr: string[] = [];
-    try {
-      sizesArr = typeof p.sizes === 'string' ? JSON.parse(p.sizes) : p.sizes;
-    } catch {
-      sizesArr = typeof p.sizes === 'string' ? p.sizes.split(',') : [];
-    }
-    try {
-      colorsArr = typeof p.colors === 'string' ? JSON.parse(p.colors) : p.colors;
-    } catch {
-      colorsArr = typeof p.colors === 'string' ? p.colors.split(',') : [];
-    }
-
+    try { sizesArr = typeof p.sizes === 'string' ? JSON.parse(p.sizes) : p.sizes; } catch { sizesArr = []; }
+    try { colorsArr = typeof p.colors === 'string' ? JSON.parse(p.colors) : p.colors; } catch { colorsArr = []; }
     return {
       id: p.id || 0,
       name: p.name,
@@ -1468,16 +1571,107 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
       image_key: p.image_key || null,
       featured: p.featured || 0,
       created_at: p.created_at || '',
-      image_url: p.image_key ? `/api/images/${encodeURIComponent(p.image_key)}` : null,
+      image_url: p.image_key ? '/api/images/' + encodeURIComponent(p.image_key) : null,
     };
   });
 
-  return c.json({
-    answer: aiResponseText,
-    sources,
-    products: suggestedProducts,
-    readyToConfirm: false,
-  });
+  await emitter.products(suggestedProducts);
+  await emitter.sources(sources);
+  await emitter.chips?.(['Tư vấn chọn size', 'Chính sách freeship', 'Xem thêm mẫu']);
+  await emitter.done();
+}
+
+/**
+ * ENDPOINT CHÍNH: POST /api/chat
+ * Hỗ trợ đồng thời 2 giao thức:
+ * 1. Server-Sent Events (SSE Streaming) khi client yêu cầu (stream: true hoặc Accept: text/event-stream)
+ * 2. REST JSON đồng bộ truyền thống phục vụ kiểm thử và tương thích ngược 100%
+ */
+chatbot.post('/chat', async (c) => {
+  const parsed = chatRequestSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return fail(
+      parsed.error.errors[0]?.message || 'Dữ liệu không hợp lệ (câu hỏi: 2 - 600 ký tự)',
+      400,
+    );
+  }
+
+  const isStream = Boolean(parsed.data.stream) || (c.req.header('accept') || '').includes('text/event-stream');
+
+  if (isStream) {
+    return streamSSE(c, async (stream) => {
+      const emitter: ChatResponseEmitter = {
+        status: async (msg: string) => {
+          await stream.writeSSE({ event: 'status', data: JSON.stringify({ message: msg }) });
+        },
+        delta: async (text: string) => {
+          await stream.writeSSE({ event: 'delta', data: JSON.stringify({ text }) });
+        },
+        products: async (prods: any[]) => {
+          await stream.writeSSE({ event: 'products', data: JSON.stringify({ products: prods }) });
+        },
+        sources: async (srcs: string[]) => {
+          await stream.writeSSE({ event: 'sources', data: JSON.stringify({ sources: srcs }) });
+        },
+        orderReady: async (data: { pendingOrder: any; readyToConfirm: boolean }) => {
+          await stream.writeSSE({ event: 'order_ready', data: JSON.stringify(data) });
+        },
+        orderCreated: async (order: any) => {
+          await stream.writeSSE({ event: 'order_created', data: JSON.stringify({ createdOrder: order }) });
+        },
+        chips: async (chipList: string[]) => {
+          await stream.writeSSE({ event: 'chips', data: JSON.stringify({ chips: chipList }) });
+        },
+        done: async () => {
+          await stream.writeSSE({ event: 'done', data: JSON.stringify({ ok: true }) });
+        },
+      };
+
+      try {
+        await processChatPipeline(c, parsed.data, emitter, true);
+      } catch (streamErr: any) {
+        console.error('[Stream Error]', streamErr);
+        await emitter.delta('\n\n[Lỗi kết nối stream: ' + (streamErr?.message || 'Không xác định') + ']');
+        await emitter.done();
+      }
+    });
+  } else {
+    // Chế độ REST JSON truyền thống (100% backward compatible)
+    const result: any = {
+      answer: '',
+      sources: [],
+      products: [],
+      readyToConfirm: false,
+      chips: [],
+    };
+
+    const emitter: ChatResponseEmitter = {
+      status: async () => {},
+      delta: async (text: string) => {
+        result.answer += text;
+      },
+      products: async (prods: any[]) => {
+        result.products = prods;
+      },
+      sources: async (srcs: string[]) => {
+        result.sources = srcs;
+      },
+      orderReady: async (data: { pendingOrder: any; readyToConfirm: boolean }) => {
+        result.readyToConfirm = data.readyToConfirm;
+        result.pendingOrder = data.pendingOrder;
+      },
+      orderCreated: async (order: any) => {
+        result.createdOrder = order;
+      },
+      chips: async (chipList: string[]) => {
+        result.chips = chipList;
+      },
+      done: async () => {},
+    };
+
+    await processChatPipeline(c, parsed.data, emitter, false);
+    return c.json(result);
+  }
 });
 
 // 1. Lấy danh sách tài liệu trong kho tri thức

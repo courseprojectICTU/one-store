@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 
-const BASE_URL = process.env.TEST_URL || 'http://127.0.0.1:8787';
+const BASE_URL = process.argv[2] || process.env.TEST_URL || 'http://127.0.0.1:8787';
 
 console.log(`[TEST] Testing Sandbox Admin Authorization on: ${BASE_URL}`);
 
