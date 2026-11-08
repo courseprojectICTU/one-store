@@ -1137,6 +1137,23 @@ Dự án đã trải qua hành trình nâng cấp toàn diện qua 27 cột mố
             + "làm thế nào để mua": Hướng dẫn các bước đặt hàng, tuyệt đối không tự gán mẫu Asics.
             + "Tìm đôi dưới 1 triệu": Tự động hủy pendingOrder, giải thích trung thực kho D1 không có giá dưới 1 triệu và gợi ý phương án.
 
+    48. **Nâng Cấp Chatbot AI v2.2 Closed-Domain & Ultra-Fast Routing (5 Chính Sách Cốt Lõi 0ms, Fast Out-of-Scope Guardrail 0ms, Knowledge Gatekeeper & Strict Closed-Domain Directive)**:
+        - **Bối cảnh & Yêu cầu người dùng**:
+          * Chatbot AI cần phản hồi cực nhanh (< 35ms) cho toàn bộ 5 chính sách cốt lõi của shop và hệ thống đặt hàng giày.
+          * Các chủ đề không liên quan bên ngoài (ẩm thực, đồ uống như coffee, thời tiết, lập trình, quần áo thời trang, chính trị, v.v.): Phản hồi từ chối tức thì (Fast Out-of-Scope Guardrail 0ms); tuyệt đối không tự bịa (Zero-Hallucination) và không được truy cập kiến thức bên ngoài thế giới (Strict Closed-Domain).
+          * Chỉ trả lời những gì có trong cơ sở tri thức đã huấn luyện/seed trong D1 & Vectorize.
+        - **Kiến trúc triển khai (Mô hình 4 tầng bảo vệ Defense-in-Depth)**:
+          * **Tầng 1 - Fast Local Router (0ms tại Edge Worker)**: Mở rộng 11 nhóm phản hồi siêu tốc: Smalltalk, Store Info, Tra cứu mã đơn `ONE-...`, Mua kèm phụ kiện, 5 Chính sách cốt lõi (Freeship từ 3 đôi hoặc 5 triệu, Đổi size 7 ngày miễn phí 100% cước 2 chiều lần đầu, Bảo hành 6-12 tháng và dán keo trọn đời, Đồng kiểm và xỏ thử COD 100%, Voucher ONE10 giảm 10%), và Cẩm nang đo size chân bè Á Đông.
+          * **Tầng 2 - Fast Out-of-Scope Guardrail (0ms tại Edge Worker)**: Regex NFC-normalized nhận diện tức thì các chủ đề bên ngoài thế giới và sản phẩm phi giày dép (áo sơ mi, áo khoác, quần tây, cà phê, thời tiết, code...) -> từ chối ngay trong < 25ms logic, tiêu tốn 0 token LLM, loại bỏ hoàn toàn độ trễ và tải server.
+          * **Tầng 3 - Knowledge Gatekeeper (Similarity Threshold Gate)**: Chốt chặn kiểm soát trước khi gọi LLM: nếu câu hỏi không khớp bất kỳ sản phẩm D1 nào và không thuộc domain giày/thương hiệu, ngưỡng vector similarity `maxVectorScore < 0.70` (hoặc < 0.50 cho domain giày) sẽ bị từ chối ngay tại Edge Worker, không chuyển tiếp tới LLM Gemma 4.
+          * **Tầng 4 - Strict Closed-Domain System Prompt & Output Sanitizer**: Bổ sung chỉ thị đóng băng phạm vi tri thức vào System Prompt, cấm 100% pre-trained knowledge bên ngoài; bổ sung Output Sanitizer lọc bỏ toàn bộ rò rỉ prompt và nhẩm reasoning của LLM Gemma.
+        - **Kết Quả Nghiệm Thu**:
+          * Tài liệu thiết kế: `docs/KE_HOACH_NANG_CAP_CHATBOT_CLOSED_DOMAIN_VA_FAST_ROUTING.md`.
+          * Bộ test tự động: `scripts/test_chatbot_closed_domain.ts` đạt **37/37 tiêu chí (100% Pass)**.
+          * Hồi quy 100% Pass: `test_chatbot_intent_routing.ts` (26/26), `test_chatbot_v2.mjs` (17/17).
+          * Kiểm thử Live Production (`https://one-store.onestoresportsshoes.workers.dev`, Version ID: `0af50fae-6529-4dff-a7e5-123b28e1a6ad`): **12/12 kịch bản ĐẠT 100%**, phản hồi chính sách & chặn out-of-scope chỉ mất 66ms - 171ms (giảm 99.5% thời gian so với trước) và 0 token LLM.
+
+
 
 
 ---
@@ -1306,6 +1323,9 @@ one-store/
 | `scripts/test_chatbot_intent_routing.ts` | Created | Bộ kiểm thử tự động 26/26 tiêu chí xác thực Turn-level Intent, Context Switch và Role-Gated Scorer. |
 | `backend/src/chatbot.ts` | Modified | Nâng cấp Intent Routing theo câu hiện tại, Context Switch Detection, Role-Gated Scorer (role === 'user') và Entity Sanitizer. |
 | `frontend/src/components/ChatbotWidget.tsx` | Modified | Nhận diện sự kiện reset pendingOrder = null khi context switch, làm sạch state tức thì. |
+| `docs/KE_HOACH_NANG_CAP_CHATBOT_CLOSED_DOMAIN_VA_FAST_ROUTING.md` | Created | Bản kế hoạch kỹ thuật kiến trúc 4 tầng bảo vệ Defense-in-Depth, Closed-Domain AI và Fast Routing 5 chính sách 0ms. |
+| `scripts/test_chatbot_closed_domain.ts` | Created | Bộ kiểm thử tự động 37/37 tiêu chí xác thực Closed-Domain Guardrails, Fast Router 5 chính sách 0ms, Zero-Emoji và Knowledge Gatekeeper. |
+| `backend/src/chatbot.ts` | Modified | Nâng cấp Closed-Domain AI v2.2: Fast Router 11 nhóm (5 chính sách cốt lõi 0ms, cẩm nang size chân), Fast Out-of-Scope Guardrail 0ms (< 25ms logic), Tầng 3 Knowledge Gatekeeper (Similarity Threshold Gate), Tầng 4 Strict Closed-Domain System Prompt & Output Sanitizer. |
 
 
 ---

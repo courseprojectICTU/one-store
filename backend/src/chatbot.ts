@@ -737,6 +737,17 @@ export function cleanModelOutput(text: string): string {
   cleaned = cleaned.replace(/"\s*\n\s*\*/g, '\n*');
   cleaned = cleaned.replace(/\n\s*"\s*/g, '\n');
 
+  // 10. Chặn rò rỉ prompt chỉ dẫn kỹ thuật và closed-domain reasoning
+  if (
+    cleaned.includes('Closed-domain') ||
+    cleaned.includes('DANH MỤC GIÀY SẴN CÓ') ||
+    cleaned.includes('TRÍCH ĐOẠN TRI THỨC') ||
+    cleaned.includes('Use *only* provided data') ||
+    cleaned.includes('strict grounding')
+  ) {
+    cleaned = 'Dạ câu hỏi này hiện nằm ngoài phạm vi cơ sở dữ liệu tri thức của One - Store. Em chỉ được cung cấp dữ liệu chính thức về 70 mẫu giày sneaker chính hãng Âu - Á và các chính sách bán hàng của cửa hàng. Bạn có muốn em hỗ trợ tìm kiếm mẫu giày thể thao nào đang có sẵn không ạ?';
+  }
+
   // 9. Rút gọn các dòng trống dư thừa
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
   return cleaned;
@@ -752,7 +763,19 @@ export function cleanModelOutput(text: string): string {
  */
 
 export interface FastRouteResult {
-  type: 'smalltalk' | 'store_info' | 'order_lookup' | 'accessory_add' | 'catalog_or_policy';
+  type:
+    | 'smalltalk'
+    | 'store_info'
+    | 'order_lookup'
+    | 'accessory_add'
+    | 'policy_freeship'
+    | 'policy_return'
+    | 'policy_warranty'
+    | 'policy_inspection'
+    | 'policy_voucher'
+    | 'policy_sizeguide'
+    | 'out_of_scope'
+    | 'catalog_or_policy';
   answer?: string;
   chips?: string[];
   orderCode?: string;
@@ -793,7 +816,21 @@ export function fastLocalRouter(query: string): FastRouteResult {
     };
   }
 
-  // 3. Nhận diện các câu chào hỏi xã giao, cảm ơn (Smalltalk)
+  // 3. TẦNG BẢO VỆ 1C: FAST OUT-OF-SCOPE GUARDRAIL (0 ms)
+  // Nhận diện tức thì các chủ đề bên ngoài thế giới không thuộc phạm vi kinh doanh của One - Store
+  const isOutOfScope =
+    /(cà phê|coffee|trà sữa|trà đào|nước ngọt|bia|rượu|nấu ăn|món ăn|công thức món|quán ăn|nhà hàng|thực phẩm|đồ ăn|thời tiết|nhiệt độ|trời mưa|dự báo thời tiết|giải toán|viết code|lập trình|python|javascript|java|c\+\+|html|css|sửa máy tính|laptop|điện thoại|iphone|samsung|quần áo|áo sơ mi|áo khoác|áo len|áo thun|áo phông|áo hoodie|áo polo|áo dài|áo croptop|áo chống nắng|áo ba lỗ|quần jean|quần short|quần đùi|quần bò|quần kaki|quần tây|quần dài|quần ống rộng|quần jogger|quần lót|váy|đầm|suit|vest|chân váy|nón|mũ|kính mát|kính râm|thắt lưng|dây nịt|túi xách|ví da|đồng hồ|mỹ phẩm|son môi|kem dưỡng|nước hoa|trang sức|xe máy|ô tô|phim ảnh|diễn viên|ca sĩ|bài hát|chính trị|tin tức xã hội|bitcoin|crypto|tiền ảo|chứng khoán)/i.test(q) &&
+    !/(giày|sneaker|chạy bộ|marathon|bóng rổ|dã ngoại|asics|nike|adidas|mizuno|puma|new balance|salomon|hoka|li-ning|anta|jordan)/i.test(q);
+
+  if (isOutOfScope) {
+    return {
+      type: 'out_of_scope',
+      answer: 'Dạ Tư vấn One rất tiếc không thể hỗ trợ thông tin này do nằm ngoài phạm vi hoạt động của One - Store. Em là trợ lý chuyên biệt chỉ hỗ trợ tư vấn giày thể thao, sneaker chính hãng Âu - Á và các chính sách dịch vụ tại One - Store thôi ạ!',
+      chips: ['Xem 70 mẫu sneaker', 'Tư vấn chọn size', 'Chính sách freeship', 'Chính sách đổi trả'],
+    };
+  }
+
+  // 4. Nhận diện các câu chào hỏi xã giao, cảm ơn (Smalltalk)
   const isSmalltalk =
     /^(xin chào|chào shop|chào bạn|chào em|chào ad|chào bot|hello|hi|hey|alo|shop ơi|bot ơi)(\s+(shop|ad|em|bot|bạn|nha|nhé|ơi))*[\s!.,?~]*$/i.test(q) ||
     /^(cảm ơn|cám ơn|thank you|thanks|tạm biệt|bye)(\s+(shop|ad|em|bot|bạn|nhiều|nha|nhé))*[\s!.,?~]*$/i.test(q);
@@ -806,7 +843,7 @@ export function fastLocalRouter(query: string): FastRouteResult {
     };
   }
 
-  // 4. Nhận diện hỏi thông tin showroom, địa chỉ, hotline, giờ mở cửa
+  // 5. Nhận diện hỏi thông tin showroom, địa chỉ, hotline, giờ mở cửa
   const isStoreInfo =
     /(địa chỉ|ở đâu|showroom|chi nhánh|cửa hàng|giờ mở cửa|mấy giờ đóng|hotline|số điện thoại|sđt shop|liên hệ)/i.test(q) &&
     !/(đặt|mua|chốt|hủy|size|màu|giá)/i.test(q);
@@ -819,13 +856,87 @@ export function fastLocalRouter(query: string): FastRouteResult {
     };
   }
 
+  // 6. CHÍNH SÁCH FREESHIP & PHÍ VẬN CHUYỂN (0 ms)
+  const isFreeship =
+    /(freeship|miễn phí ship|miễn phí vận chuyển|phí ship|phí vận chuyển|tiền ship|cước vận chuyển|cước ship|cước giao)/i.test(q) &&
+    !/(đặt|mua|chốt|hủy|tôi lấy đôi)/i.test(q);
+
+  if (isFreeship) {
+    return {
+      type: 'policy_freeship',
+      answer: 'Dạ chính sách vận chuyển tại One - Store được áp dụng minh bạch như sau:\n\n- **Miễn phí vận chuyển toàn quốc (Freeship):** Áp dụng cho đơn hàng đặt từ **3 đôi giày** trở lên HOẶC hóa đơn từ **5.000.000 VND**.\n- **Đơn hàng dưới 3 đôi (dưới 5.000.000 VND):** Cước vận chuyển đồng giá ưu đãi **30.000 VND** trên toàn quốc.\n- **Thời gian giao hàng dự kiến:** Từ 2 đến 3 ngày làm việc (Nội địa toàn quốc).\n- **Đặc quyền COD:** 100% đơn hàng được **mở hộp đồng kiểm và xỏ thử tại chỗ** trước khi thanh toán tiền mặt cho shipper ạ!',
+      chips: ['Xem 70 mẫu giày', 'Chính sách đổi size', 'Mã giảm giá ONE10'],
+    };
+  }
+
+  // 7. CHÍNH SÁCH ĐỔI SIZE & ĐỔI TRẢ 7 NGÀY (0 ms)
+  const isReturn =
+    /(đổi size|đổi cỡ|đổi trả|đổi hàng|đổi giày|7 ngày|chật quá|rộng quá|không vừa chân|đổi mẫu)/i.test(q) &&
+    !/(đặt|chốt|tôi lấy đôi|mua luôn)/i.test(q);
+
+  if (isReturn) {
+    return {
+      type: 'policy_return',
+      answer: 'Dạ One - Store áp dụng chính sách đổi cỡ giày và đổi trả linh hoạt trong vòng **7 ngày** kể từ ngày nhận hàng:\n\n- **Miễn phí 100% cước 2 chiều:** Áp dụng cho lần đổi cỡ giày đầu tiên nếu bạn đi không vừa chân.\n- **Đổi sang mẫu khác:** Bạn hoàn toàn được đổi sang mẫu giày khác linh hoạt (bù trừ chênh lệch giá nếu có).\n- **Điều kiện hợp lệ:** Giày còn nguyên hộp chính hãng, đầy đủ tem mác phụ kiện và chưa qua sử dụng ngoài trời.\n\n*(Nếu cần đổi size, bạn chỉ cần nhắn mã đơn hàng tại đây hoặc gọi hotline 1900 8888 để được hỗ trợ gửi đôi mới tận nhà nhé!)*',
+      chips: ['Bảng quy đổi size', 'Cách đo bàn chân', 'Hotline 1900 8888'],
+    };
+  }
+
+  // 8. CHÍNH SÁCH BẢO HÀNH CHẤT LƯỢNG (0 ms)
+  const isWarranty =
+    /(bảo hành|dán keo|bảo trì|hỏng giày|bung keo|bảo hành bao lâu|chế độ bảo hành)/i.test(q) &&
+    !/(đặt|chốt|tôi lấy đôi)/i.test(q);
+
+  if (isWarranty) {
+    return {
+      type: 'policy_warranty',
+      answer: 'Dạ chính sách bảo hành chất lượng chính hãng tại One - Store gồm các quyền lợi sau:\n\n- **Bảo hành 6 tháng:** Áp dụng cho các dòng giày chạy bộ marathon đĩa Carbon hiệu năng cao (Nike Vaporfly, Alphafly, Adidas Adios Pro, Asics Metaspeed, Li-Ning Feidian...).\n- **Bảo hành 12 tháng:** Áp dụng cho toàn bộ các dòng giày Lifestyle thời trang và Outdoor dã ngoại (Adidas Samba, Nike Air Force 1, New Balance 550, Salomon XT-6...).\n- **Bảo dưỡng trọn đời:** Hỗ trợ dán keo ép nhiệt và vệ sinh cơ bản miễn phí trọn đời sản phẩm tại showroom.\n- **Cam kết chính hãng:** Bồi hoàn 200% nếu phát hiện hàng không chính hãng ạ!',
+      chips: ['Xem giày chạy bộ', 'Xem sneaker thời trang', 'Địa chỉ showroom'],
+    };
+  }
+
+  // 9. CHÍNH SÁCH ĐỒNG KIỂM & XỎ THỬ COD (0 ms)
+  const isInspection =
+    /(đồng kiểm|xỏ thử|đi thử|thử giày|xem hàng|kiểm tra hàng|cho xem không|cho thử không|thanh toán khi nhận|nhận hàng trả tiền|cod)/i.test(q) &&
+    !/(đặt|chốt|tôi lấy đôi|sđt|địa chỉ)/i.test(q);
+
+  if (isInspection) {
+    return {
+      type: 'policy_inspection',
+      answer: 'Dạ bạn hoàn toàn yên tâm! One - Store áp dụng **100% hình thức giao hàng COD đồng kiểm tận nơi**:\n\n- Khi shipper giao tới, bạn được quyền **mở hộp kiểm tra đúng mẫu mã, màu sắc và xỏ thử trực tiếp vào chân tại chỗ**.\n- Bạn cảm thấy đi êm ái, đúng kích cỡ vừa vặn mới thanh toán tiền mặt cho nhân viên giao hàng.\n- Nếu không đúng mẫu hoặc không vừa chân, bạn có thể từ chối nhận hoặc yêu cầu đổi cỡ giày khác mà không mất phí ạ!',
+      chips: ['Tìm giày chạy bộ', 'Mã giảm giá ONE10', 'Xem 70 mẫu giày'],
+    };
+  }
+
+  // 10. CHÍNH SÁCH VOUCHER & MÃ GIẢM GIÁ (0 ms)
+  const isVoucher =
+    /(mã giảm giá|voucher|khuyến mãi|ưu đãi|one10|mã giảm|có giảm giá không)/i.test(q) &&
+    !/(đặt|chốt|tôi lấy đôi)/i.test(q);
+
+  if (isVoucher) {
+    return {
+      type: 'policy_voucher',
+      answer: 'Dạ One - Store hiện đang áp dụng mã ưu đãi độc quyền dành cho khách hàng:\n\n- **Mã voucher:** **ONE10**\n- **Mức giảm:** **Giảm ngay 10%** trên tổng giá trị đơn hàng.\n- **Phạm vi áp dụng:** Áp dụng cho toàn bộ 70 mẫu giày thể thao và sneaker chính hãng Âu - Á đang có sẵn trong kho.\n\n*(Khi chốt đơn trong khung chat hoặc tại trang thanh toán, hệ thống sẽ tự động áp dụng mã ONE10 để giảm trừ trực tiếp cho bạn nhé!)*',
+      chips: ['Áp dụng mã ONE10', 'Xem giày bán chạy', 'Chính sách freeship'],
+    };
+  }
+
+  // 11. CẨM NANG ĐO KÍCH THƯỚC BÀN CHÂN & TƯ VẤN CHÂN BÈ (0 ms)
+  const isSizeGuide =
+    /(cách đo chân|hướng dẫn đo chân|đo bàn chân|bảng quy đổi size|chân bè|chân to|bảng size|chọn size thế nào)/i.test(q) &&
+    !/(đặt|chốt|tôi lấy đôi)/i.test(q);
+
+  if (isSizeGuide) {
+    return {
+      type: 'policy_sizeguide',
+      answer: 'Dạ để chọn được size giày vừa vặn chuẩn xác nhất, bạn có thể áp dụng cẩm nang đo chân 3 bước của One - Store:\n\n1. **Bước 1:** Đặt tờ giấy A4 sát mép tường, đặt bàn chân lên giấy sao cho gót chân chạm nhẹ vào tường.\n2. **Bước 2:** Dùng bút đánh dấu điểm đầu ngón chân dài nhất trên giấy.\n3. **Bước 3:** Dùng thước đo khoảng cách từ mép tường đến điểm đánh dấu (tính bằng cm) rồi tra bảng size chuẩn EUR.\n\n**Mẹo chọn giày cho dáng chân Á Đông:**\n- Nếu bạn có **bàn chân bè ngang hoặc mu bàn chân dày**, bạn nên **tăng từ 0.5 đến 1 size** so với kích thước tiêu chuẩn, hoặc ưu tiên chọn các dòng giày phom rộng Wide 2E/4E của Asics, Mizuno hay Li-Ning để các ngón chân cử động thoải mái nhất nhé!',
+      chips: ['Bảng quy đổi size', 'Mẫu giày cho chân bè', 'Xem giày Asics'],
+    };
+  }
+
   return { type: 'catalog_or_policy' };
 }
 
-/**
- * ENDPOINT NHẬN DẠNG GIỌNG NÓI: POST /api/chat/transcribe
- * Tiếp nhận tệp âm thanh (multipart hoặc binary buffer) và gọi mô hình Whisper Large v3 Turbo trên Workers AI
- */
 chatbot.post('/chat/transcribe', async (c) => {
   try {
     const contentType = c.req.header('content-type') || '';
@@ -879,14 +990,13 @@ async function processChatPipeline(
   // 1. FAST LOCAL PRE-ROUTER (0 ms)
   const fastRoute = fastLocalRouter(question);
 
-  if (fastRoute.type === 'smalltalk' && fastRoute.answer) {
-    await emitter.delta(fastRoute.answer);
-    if (fastRoute.chips) await emitter.chips?.(fastRoute.chips);
-    await emitter.done();
-    return;
-  }
-
-  if (fastRoute.type === 'store_info' && fastRoute.answer) {
+  // Xử lý tức thì tất cả các nhánh phản hồi nhanh (Smalltalk, Store Info, 5 Chính sách, Size Guide, Out-of-Scope)
+  if (
+    fastRoute.type !== 'catalog_or_policy' &&
+    fastRoute.type !== 'order_lookup' &&
+    fastRoute.type !== 'accessory_add' &&
+    fastRoute.answer
+  ) {
     await emitter.delta(fastRoute.answer);
     if (fastRoute.chips) await emitter.chips?.(fastRoute.chips);
     await emitter.done();
@@ -1437,19 +1547,42 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
 
   const knowledgeContext = contextChunks.map((chunk, idx) => '[' + (idx + 1) + '] ' + chunk.title + ':\n' + chunk.content).join('\n\n');
 
-  // 3. Xây dựng System Prompt phân vai chuẩn mực Zero-Emoji
+  // 2.5. TẦNG 3: KNOWLEDGE GATEKEEPER & SIMILARITY THRESHOLD GATE
+  // Kiểm tra điểm tương đồng vector cao nhất từ Vectorize
+  const maxVectorScore = contextChunks.reduce((max, ch) => Math.max(max, ch.score || 0), 0);
+  const brandKeywords = ['nike', 'adidas', 'asics', 'mizuno', 'new balance', 'salomon', 'puma', 'on running', 'hoka', 'li-ning', 'anta', 'jordan'];
+  const questionLower = question.toLowerCase();
+  const mentionsBrand = brandKeywords.some((b) => questionLower.includes(b));
+  const mentionsShoeDomain = /(giày|sneaker|chạy bộ|marathon|bóng rổ|dã ngoại|đế|cỡ|size|xỏ thử|đồng kiểm|đổi size|freeship|bảo hành|mã giảm|đặt hàng|mua|đơn hàng)/i.test(questionLower);
+
+  // Nếu không khớp bất kỳ sản phẩm D1 nào, điểm tương đồng vector thấp và không liên quan tới sneaker/thương hiệu:
+  const isOutOfKnowledge = matchedProducts.length === 0 && (!mentionsBrand && !mentionsShoeDomain ? maxVectorScore < 0.70 : maxVectorScore < 0.50);
+  if (isOutOfKnowledge) {
+    const outAnswer = 'Dạ câu hỏi này hiện nằm ngoài phạm vi cơ sở dữ liệu tri thức của One - Store. Em chỉ được cung cấp dữ liệu chính thức về 70 mẫu giày sneaker chính hãng Âu - Á và các chính sách bán hàng của cửa hàng. Bạn có muốn em hỗ trợ tìm kiếm mẫu giày thể thao nào đang có sẵn không ạ?';
+    await emitter.delta(outAnswer);
+    await emitter.chips?.(['Xem 70 mẫu sneaker', 'Tư vấn chọn size', 'Chính sách freeship', 'Chính sách đổi trả']);
+    await emitter.done();
+    return;
+  }
+
+  // 3. XÂY DỰNG SYSTEM PROMPT PHÂN VAI STRICT CLOSED-DOMAIN (ZERO-HALLUCINATION)
   const systemPrompt = `BẠN LÀ: "Tư vấn One" — Chuyên viên tư vấn bán hàng thông minh và độc quyền của hệ sinh thái thương mại điện tử One - Store (gọi ngắn gọn là One).
 
-QUY ĐỊNH BẮT BUỘC VỀ THƯƠNG HIỆU & HÀNG HÓA:
-1. One - Store CHỈ KINH DOANH DUY NHẤT: Giày thể thao & Sneaker chính hãng (Âu - Á). Không bán quần áo hay phụ kiện thời trang khác.
-2. 10 THƯƠNG HIỆU PHÂN PHỐI CHÍNH HÃNG:
+QUY ĐỊNH BẮT BUỘC VỀ PHẠM VI TRI THỨC ĐÓNG BĂNG (CLOSED-DOMAIN STRICT GROUNDING):
+1. BẠN LÀ MỘT TRỢ LÝ ĐÓNG BĂNG PHẠM VI (CLOSED-DOMAIN AI). BẠN TUYỆT ĐỐI CHỈ ĐƯỢC PHÉP SỬ DỤNG DUY NHẤT 2 NGUỒN DỮ LIỆU ĐƯỢC CẤP TRONG CONTEXT: [DANH MỤC GIÀY SẴN CÓ TRONG KHO D1] VÀ [TRÍCH ĐOẠN TRI THỨC CHÍNH SÁCH].
+2. NGHIÊM CẤM 100% SỬ DỤNG KIẾN THỨC BÊN NGOÀI THẾ GIỚI: Tuyệt đối không sử dụng kiến thức bên ngoài được huấn luyện trước (Pre-trained knowledge) để trả lời về các chủ đề ngoài One - Store (như ẩm thực, công nghệ, chính trị, quần áo, thời tiết...).
+3. NGHIÊM CẤM BỊA ĐẶT THÔNG SỐ (ZERO-HALLUCINATION): Không tự bịa giá tiền, không tự bịa size, không tự tạo thương hiệu hoặc mẫu giày không có trong danh mục kho D1.
+4. NGUYÊN TẮC THÀNH THẬT: Nếu thông tin không có trong tài liệu được cung cấp hoặc khách hỏi điều mà bạn không tìm thấy dữ liệu đối soát, bạn BẮT BUỘC phải thẳng thắn trả lời: "Dạ thông tin này hiện chưa có trong cơ sở dữ liệu của One - Store ạ..." và lịch sự gợi ý khách hàng tham khảo các dòng giày có sẵn.
+5. One - Store CHỈ KINH DOANH DUY NHẤT: Giày thể thao & Sneaker chính hãng (Âu - Á). Không bán quần áo hay phụ kiện thời trang khác.
+6. 10 THƯƠNG HIỆU PHÂN PHỐI CHÍNH HÃNG:
    - Âu - Mỹ: Nike, Adidas, Jordan, Puma, New Balance, Salomon, On Running, Hoka One One.
    - Châu Á: Asics, Mizuno, Li-Ning, Anta.
-3. CHÍNH SÁCH BÁN HÀNG ĐẶC BIỆT:
+7. CHÍNH SÁCH BÁN HÀNG ĐẶC BIỆT:
    - Miễn phí vận chuyển toàn quốc cho đơn từ 3 đôi hoặc hóa đơn từ 5.000.000 VND (Đơn dưới mức này phí ship 30.000 VND).
    - Áp dụng mã ưu đãi ONE10 giảm ngay 10% tổng đơn hàng.
    - Hình thức COD: Khách hàng hoàn toàn được ĐỒNG KIỂM và XỎ THỬ TẬN NƠI trước khi thanh toán.
    - Đổi size trong vòng 7 ngày miễn phí cước 2 chiều lần đầu tiên.
+   - Bảo hành 6 tháng cho giày marathon Carbon và 12 tháng cho giày Lifestyle/Outdoor; dán keo ép nhiệt trọn đời.
 
 QUY CHUẨN TRÌNH BÀY & XƯNG HÔ (BẮT BUỘC 100%):
 - TUYỆT ĐỐI KHÔNG SỬ DỤNG BẤT KỲ KÝ TỰ BIỂU TƯỢNG CẢM XÚC (EMOJI) NÀO TRONG CÂU TRẢ LỜI.
