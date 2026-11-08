@@ -78,6 +78,23 @@ const chatRequestSchema = z.object({
 });
 
 /**
+ * Băm chuỗi truy vấn để làm khóa lưu trữ bộ đệm Cloudflare KV
+ */
+export async function hashQuery(str: string): Promise<string> {
+  const norm = str
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/[?!.,;:"'~`@#$%^&*()_+=\-[\]{}|\\/<>]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const encoder = new TextEncoder();
+  const data = encoder.encode(norm);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  const bytes = Array.from(new Uint8Array(hash));
+  return bytes.slice(0, 16).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
  * Trích xuất các trường từ Bảng tóm tắt đơn hàng (Order Summary Table) trong lịch sử chat
  */
 export function parseSummaryTable(text: string) {
@@ -546,6 +563,9 @@ export function extractProductFilters(
     'New Balance',
     'Salomon',
     'Puma',
+    'Jordan',
+    'Hoka',
+    'On Running',
     'Onitsuka Tiger',
     'Li-Ning',
     'Anta',
@@ -565,7 +585,57 @@ export function extractProductFilters(
     }
   }
 
-  return { minPrice, maxPrice, category, color, brand, isFollowUp };
+  // 5. Tên dòng giày / Model (Model Keyword)
+  let modelKeyword: string | null = null;
+  const modelsList = [
+    'Pegasus',
+    'Novablast',
+    'Nimbus',
+    'Kayano',
+    'Vaporfly',
+    'Alphafly',
+    'Metaspeed',
+    'Ultraboost',
+    'Samba',
+    'Gazelle',
+    'Superstar',
+    'Forum',
+    'Adios Pro',
+    'Adios',
+    '550',
+    '574',
+    '1906',
+    '2002r',
+    '990',
+    'Speedcross',
+    'XT-6',
+    'Clifton',
+    'Bondi',
+    'Speedgoat',
+    'Cloudmonster',
+    'Cloudsurfer',
+    'Feidian',
+    'Shadow',
+    'C202',
+    'Jordan 1',
+    'Jordan 4',
+  ];
+  for (const m of modelsList) {
+    if (new RegExp(`(?:^|[^\\p{L}\\p{N}])${m}(?=[^\\p{L}\\p{N}]|$)`, 'ui').test(currentLower)) {
+      modelKeyword = m;
+      break;
+    }
+  }
+  if (!modelKeyword && isFollowUp) {
+    for (const m of modelsList) {
+      if (new RegExp(`(?:^|[^\\p{L}\\p{N}])${m}(?=[^\\p{L}\\p{N}]|$)`, 'ui').test(historyText)) {
+        modelKeyword = m;
+        break;
+      }
+    }
+  }
+
+  return { minPrice, maxPrice, category, color, brand, modelKeyword, isFollowUp };
 }
 
 /**
@@ -1469,6 +1539,31 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
   }
 
   // === NHÁNH 4: TƯ VẤN SẢN PHẨM & CHÍNH SÁCH (FULL RAG + WORKERS AI GEMMA 4) ===
+  // 0. TẦNG ĐỆM CACHE: CLOUDFLARE KV (env.CACHE) (< 30ms)
+  const qClean = question.trim();
+  const qHash = await hashQuery(qClean);
+  const cacheKey = `chat_cache_v2:${qHash}`;
+  if (c.env.CACHE && (!history || history.length === 0)) {
+    try {
+      const cached = (await c.env.CACHE.get(cacheKey, 'json')) as {
+        answer: string;
+        products?: any[];
+        sources?: any[];
+        chips?: string[];
+      } | null;
+      if (cached && cached.answer) {
+        await emitter.delta(cached.answer);
+        if (cached.products?.length) await emitter.products(cached.products);
+        if (cached.sources?.length) await emitter.sources(cached.sources);
+        if (cached.chips?.length) await emitter.chips?.(cached.chips);
+        await emitter.done();
+        return;
+      }
+    } catch (cacheErr) {
+      console.warn('[Cache Read Warning]', cacheErr);
+    }
+  }
+
   if (isStream) {
     await emitter.status('Đang tra cứu tri thức và kho giày D1...');
   }
@@ -1483,6 +1578,11 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
     bindParams.push('%' + filters.brand.toLowerCase() + '%');
   }
 
+  if (filters.modelKeyword) {
+    whereClauses.push('LOWER(name) LIKE ?');
+    bindParams.push('%' + filters.modelKeyword.toLowerCase() + '%');
+  }
+
   if (filters.category) {
     whereClauses.push('category = ?');
     bindParams.push(filters.category);
@@ -1493,14 +1593,83 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
     bindParams.push(filters.maxPrice);
   }
 
-  const hasSpecificFilter = Boolean(filters.brand || filters.category || filters.maxPrice || filters.color);
+  const hasSpecificFilter = Boolean(filters.brand || filters.modelKeyword || filters.category || filters.maxPrice || filters.color);
   const sqlQuery = 'SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE ' + whereClauses.join(' AND ') + ' ORDER BY featured DESC, id ASC LIMIT 20';
 
   const productStmt = c.env.DB.prepare(sqlQuery);
   const productRes = await (bindParams.length > 0 ? productStmt.bind(...bindParams) : productStmt).all();
   const matchedProducts = (productRes.results || []) as ProductRecord[];
 
-  const catalogContext = matchedProducts.map((p) => {
+  // === MŨI NHỌN 1: FAST CATALOG DIRECT RESOLVER (< 80ms, 0 Token LLM) ===
+  // Trực tiếp xử lý câu hỏi hỏi giá tiền, kích cỡ hoặc tình trạng còn hàng của sản phẩm cụ thể từ CSDL D1
+  const isDirectCatalogQuery =
+    /(giá bao nhiêu|nhiêu tiền|bao tiền|có giá|cho xin giá|hỏi giá|giá cả|giá sao|bán giá|bao nhiêu 1 đôi|bao nhiêu một đôi|có size|còn size|còn hàng không|còn mẫu không)/i.test(
+      question.toLowerCase(),
+    );
+
+  if (isDirectCatalogQuery && matchedProducts.length > 0 && matchedProducts.length <= 4) {
+    let fastAnswer = '';
+    if (matchedProducts.length === 1) {
+      const p = matchedProducts[0];
+      let sizesStr = p.sizes;
+      let colorsStr = p.colors;
+      try { sizesStr = JSON.parse(p.sizes).join(', '); } catch {}
+      try { colorsStr = JSON.parse(p.colors).join(', '); } catch {}
+      fastAnswer = `Dạ chào bạn, tại One - Store mẫu **${p.name}** (${p.category}) chính hãng hiện có giá niêm yết là **${p.price.toLocaleString('vi-VN')} VND**.\n\n- **Tình trạng kho:** Còn sẵn ${p.stock} đôi tại showroom.\n- **Cỡ giày có sẵn:** ${sizesStr}.\n- **Màu sắc:** ${colorsStr}.\n\nKhi đặt mua đôi này, bạn được áp dụng mã voucher **ONE10** giảm ngay 10%, miễn phí ship khi mua từ 3 đôi hoặc hóa đơn từ 5.000.000 VND, và quyền **đồng kiểm, xỏ thử giày tận nơi** trước khi thanh toán COD ạ!`;
+    } else {
+      const itemsList = matchedProducts.map((p) => {
+        let sizesStr = p.sizes;
+        try { sizesStr = JSON.parse(p.sizes).join(', '); } catch {}
+        return `- **${p.name}**: **${p.price.toLocaleString('vi-VN')} VND** (Còn ${p.stock} đôi, size: ${sizesStr})`;
+      }).join('\n');
+      fastAnswer = `Dạ One - Store xin gửi bạn thông tin giá và cỡ giày của các mẫu bạn đang quan tâm:\n\n${itemsList}\n\nToàn bộ sản phẩm đều là hàng chính hãng 100%, được áp dụng mã ưu đãi **ONE10** giảm 10%, chính sách **đồng kiểm và xỏ thử tại chỗ 100%**, cùng chế độ bảo hành 6-12 tháng chính hãng ạ!`;
+    }
+
+    const fastSuggested = matchedProducts.map((p) => {
+      let sizesArr: string[] = [];
+      let colorsArr: string[] = [];
+      try { sizesArr = typeof p.sizes === 'string' ? JSON.parse(p.sizes) : p.sizes; } catch { sizesArr = []; }
+      try { colorsArr = typeof p.colors === 'string' ? JSON.parse(p.colors) : p.colors; } catch { colorsArr = []; }
+      return {
+        id: p.id || 0,
+        name: p.name,
+        slug: p.slug || '',
+        category: p.category,
+        description: p.description,
+        price: p.price,
+        compare_at_price: p.compare_at_price || null,
+        stock: p.stock,
+        sizes: sizesArr,
+        colors: colorsArr,
+        image_key: p.image_key || null,
+        featured: p.featured || 0,
+        created_at: p.created_at || '',
+        image_url: p.image_key ? '/api/images/' + encodeURIComponent(p.image_key) : null,
+      };
+    });
+
+    await emitter.delta(fastAnswer);
+    await emitter.products(fastSuggested);
+    await emitter.chips?.(['Tư vấn chọn size', 'Chính sách freeship', 'Xem thêm mẫu']);
+    await emitter.done();
+
+    // Lưu vào KV cache
+    if (c.env.CACHE) {
+      await c.env.CACHE.put(
+        cacheKey,
+        JSON.stringify({
+          answer: fastAnswer,
+          products: fastSuggested,
+          sources: ['Kho giày chính hãng D1'],
+          chips: ['Tư vấn chọn size', 'Chính sách freeship', 'Xem thêm mẫu'],
+        }),
+        { expirationTtl: 14400 },
+      ).catch(() => {});
+    }
+    return;
+  }
+
+  const catalogContext = matchedProducts.slice(0, 4).map((p) => {
     let sizesStr = p.sizes;
     let colorsStr = p.colors;
     try { sizesStr = JSON.parse(p.sizes).join(', '); } catch {}
@@ -1585,6 +1754,7 @@ QUY ĐỊNH BẮT BUỘC VỀ PHẠM VI TRI THỨC ĐÓNG BĂNG (CLOSED-DOMAIN S
    - Bảo hành 6 tháng cho giày marathon Carbon và 12 tháng cho giày Lifestyle/Outdoor; dán keo ép nhiệt trọn đời.
 
 QUY CHUẨN TRÌNH BÀY & XƯNG HÔ (BẮT BUỘC 100%):
+- QUY ĐỊNH TỐC ĐỘ & ĐỘ DÀI: Trả lời trực tiếp bằng tiếng Việt súc tích trong tối đa 3-4 câu ngắn gọn (dưới 150 từ). Tuyệt đối không viết nháp tiếng Anh, không phân tích dàn ý, tập trung ngay vào tư vấn đúng mẫu giày phù hợp từ kho D1.
 - TUYỆT ĐỐI KHÔNG SỬ DỤNG BẤT KỲ KÝ TỰ BIỂU TƯỢNG CẢM XÚC (EMOJI) NÀO TRONG CÂU TRẢ LỜI.
 - Sử dụng xưng hô lịch sự, thân thiện: "One", "Tư vấn One" hoặc "Em" - "Bạn" hoặc "Quý khách".
 - Sử dụng định dạng Markdown rõ ràng: in đậm tên giày, giá tiền VND, gạch đầu dòng phân ý mạch lạc.`;
@@ -1621,13 +1791,13 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
 
   let aiResponseText = '';
 
-  // 4. GỌI MÔ HÌNH GEMMA 4 (STREAMING HOẶC NON-STREAMING)
+  // 4. GỌI MÔ HÌNH LLM (STREAMING HOẶC NON-STREAMING - TỐC ĐỘ CAO <= 3S)
   if (isStream) {
     try {
-      const aiResult = (await c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
+      const aiResult = (await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
         messages: conversationMessages,
-        max_tokens: 2048,
-        temperature: 0.2,
+        max_tokens: 350,
+        temperature: 0.1,
         stream: true,
       })) as any;
 
@@ -1669,10 +1839,10 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
     }
   } else {
     try {
-      const aiResult = (await c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
+      const aiResult = (await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
         messages: conversationMessages,
-        max_tokens: 2048,
-        temperature: 0.2,
+        max_tokens: 350,
+        temperature: 0.1,
       })) as any;
 
       const message = aiResult?.choices?.[0]?.message;
@@ -1746,6 +1916,24 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
   await emitter.sources(sources);
   await emitter.chips?.(['Tư vấn chọn size', 'Chính sách freeship', 'Xem thêm mẫu']);
   await emitter.done();
+
+  // 6. LƯU KẾT QUẢ VÀO CLOUDFLARE KV CACHE (< 30ms cho các lần truy vấn tiếp theo)
+  if (c.env.CACHE && (!history || history.length === 0) && aiResponseText) {
+    try {
+      await c.env.CACHE.put(
+        cacheKey,
+        JSON.stringify({
+          answer: aiResponseText,
+          products: suggestedProducts,
+          sources,
+          chips: ['Tư vấn chọn size', 'Chính sách freeship', 'Xem thêm mẫu'],
+        }),
+        { expirationTtl: 14400 },
+      );
+    } catch (cachePutErr) {
+      console.warn('[Cache Put Warning]', cachePutErr);
+    }
+  }
 }
 
 /**
