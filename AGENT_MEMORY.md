@@ -1173,6 +1173,36 @@ Dự án đã trải qua hành trình nâng cấp toàn diện qua 27 cột mố
           * Cloudflare KV Cache Hit: **132ms – 951ms**.
           * Tỷ lệ đạt chuẩn $\le$ 5s: **100% các kịch bản** (thực tế toàn bộ đều $\le$ 1.8s).
 
+    50. **Khắc Phục Triệt Để Lỗi Rập Khuôn AI Chatbot & Xử Lý Thông Minh Câu Hỏi Ngân Sách, Đặt Hàng, Chính Hãng, Toán Học & Màu Sắc Bám Sát Ngữ Cảnh**:
+        - **Bối cảnh & Phân tích nguyên nhân gốc rễ**:
+          * Người dùng phát hiện Chatbot trả lời rập khuôn một câu chào giới thiệu 10 thương hiệu cho nhiều câu hỏi cụ thể ("30-6 bằng bao nhiêu", "hướng dẫn đặt hàng", "tôi muốn mua giày", "đôi nào phù hợp với tôi", "tôi thích màu đỏ nên đeo đôi nào", "tìm đôi giày dưới 2 triệu").
+          * Câu hỏi "có đôi nào dưới 1 triệu không" bị báo máy móc "câu hỏi nằm ngoài phạm vi tri thức" do bộ lọc SQL `price <= 1.000.000` trả về 0 kết quả, kích hoạt Gatekeeper nhầm.
+          * Nguyên nhân cốt lõi do Cloudflare Workers AI mã lỗi 5028: alias mô hình `@cf/meta/llama-3.1-8b-instruct` bị Cloudflare báo deprecated dẫn đến rơi vào khối `catch`, làm rỗng `aiResponseText` và kích hoạt câu fallback mặc định.
+          * Câu fallback mặc định bị lưu vào Cloudflare KV Cache (`env.CACHE`), khiến mọi câu hỏi trùng hash sau đó đều trả về câu rập khuôn này.
+          * SQLite trên Cloudflare D1 không chuyển đổi Unicode tiếng Việt có dấu trong hàm `LOWER()` (ví dụ: chữ `Đ` trong `"Đen Trắng Phối Đỏ"` không biến thành `đ`), khiến mệnh đề `LOWER(colors) LIKE '%đỏ%'` bị rỗng.
+        - **Giải pháp & Kiến trúc nâng cấp đã triển khai**:
+          * **Fast Local Router 0ms**:
+            - Bổ sung nhóm `math_calculation`: Nhận diện biểu thức toán học số học đơn giản (ví dụ: `30-6`), tính ra `24`, trả lời bám sát câu hỏi và lịch sự kéo về tư vấn giày One - Store (< 80ms).
+            - Bổ sung nhóm `policy_authenticity`: Nhận diện câu hỏi hàng auth/fake, chính hãng; khẳng định cam kết 100% chính hãng, đền gấp 10 lần giá trị đơn hàng, Fullbox tem mác, 100% đồng kiểm xỏ thử COD tại chỗ (< 80ms).
+            - Bổ sung nhóm `policy_how_to_order`: Hướng dẫn rõ ràng quy trình đặt hàng 3 bước (Chọn mẫu & size -> Gửi thông tin nhận hàng -> Nhận hàng và xỏ thử COD tận nơi) (< 80ms).
+            - Tinh chỉnh nhánh `isOutOfScope`: Bám sát chủ đề thực tế (đồ uống, ẩm thực, quần áo thời trang, lập trình, thời tiết) thay vì từ chối chung chung.
+          * **Mũi nhọn 0 - Out-of-Budget Guardrail (Dưới giá sàn CSDL D1)**:
+            - Khi `filters.maxPrice && matchedProducts.length === 0`: Tự động truy vấn D1 lấy 2 mẫu có giá thấp nhất (`ORDER BY price ASC LIMIT 2`), trả lời trung thực mức giá khởi điểm của shop từ 1.890.000 VND (Anta Walker) và 1.990.000 VND (Puma Suede), đính kèm thẻ 2 sản phẩm này.
+          * **Mũi nhọn 1 - Fast Catalog Direct Resolver Mở Rộng**:
+            - Mở rộng xử lý câu hỏi hỏi giá tiền, kích cỡ, màu sắc, tìm kiếm danh mục/ngân sách từ CSDL D1; sửa điều kiện so sánh màu sắc tiếng Việt đa biến thể `(colors LIKE ? OR colors LIKE ?)`; lấy Top 4 sản phẩm hiển thị, trả lời ngay tại Edge trong **< 160ms**.
+          * **Workers AI Model & Sanitizer**:
+            - Chuyển sang mô hình Workers AI `@cf/google/gemma-4-26b-a4b-it` với `max_tokens: 500`, `temperature: 0.1`.
+            - Chỉ trích xuất từ reasoning khi `!content`, ưu tiên 100% content của LLM; bổ sung bộ lọc cắt bỏ hoàn toàn các thẻ CoT tiếng Anh (`Constraint \d+`, `Step \d+`, `Direct answer`).
+            - Chỉ lưu KV Cache khi câu trả lời hợp lệ và KHÔNG phải là chuỗi fallback mặc định; nâng cache prefix lên `chat_cache_v6:<hash>` để dọn sạch toàn bộ cache cũ.
+        - **Kết Quả Nghiệm Thu Thực Tế Trên Production** (Version ID: `8fafddff-317f-4c6b-81f8-2e6ad7cd310d`):
+          * `có đôi nào dưới 1 triệu không`: **770ms** -> Báo giá sàn 1.890.000 VND (Anta Walker & Puma Suede) kèm 2 thẻ sản phẩm.
+          * `làm thế nào để đặt hàng` & `hướng dẫn đặt hàng`: **100ms - 368ms** -> 3 bước COD xỏ thử tận nơi.
+          * `giày shop có chính hãng không`: **713ms** -> Cam kết đền 10 lần, 100% chính hãng, đồng kiểm tận nơi.
+          * `30-6 bằng bao nhiêu`: **674ms** -> Tính đúng 30 - 6 = 24 và dẫn dắt về giày thể thao.
+          * `tìm đôi giày dưới 2 triệu`: **144ms** -> Gợi ý Puma Suede (1.990k) và Anta Walker (1.890k) kèm thẻ.
+          * `tôi thích màu đỏ nên đeo đôi nào`: **159ms** -> Gợi ý 4 mẫu phối màu Đỏ (Adidas Ultraboost Light, Asics Metaspeed, Onitsuka Tiger Mexico 66, Li-Ning Shadow 2).
+          * 100% phản hồi trong **70ms - 1.4s** (vượt xa chuẩn $\le$ 5s), Zero-Emoji 100%, 0 lỗi rập khuôn.
+
 
 
 
@@ -1346,6 +1376,7 @@ one-store/
 | `docs/KE_HOACH_NANG_CAP_CHATBOT_CLOSED_DOMAIN_VA_FAST_ROUTING.md` | Created | Bản kế hoạch kỹ thuật kiến trúc 4 tầng bảo vệ Defense-in-Depth, Closed-Domain AI và Fast Routing 5 chính sách 0ms. |
 | `scripts/test_chatbot_closed_domain.ts` | Created | Bộ kiểm thử tự động 37/37 tiêu chí xác thực Closed-Domain Guardrails, Fast Router 5 chính sách 0ms, Zero-Emoji và Knowledge Gatekeeper. |
 | `backend/src/chatbot.ts` | Modified | Nâng cấp Closed-Domain AI v2.2 & Tối ưu hiệu năng $\le$ 2s: Fast Catalog Direct Resolver 0ms (< 80ms), Cloudflare KV Cache (`env.CACHE`), mô hình Llama 3.1 8B Instruct, `max_tokens: 350`, `temperature: 0.1`. |
+| `backend/src/chatbot.ts` | Modified | Khắc phục triệt để lỗi rập khuôn AI Chatbot: Fast Local Router (toán học, cam kết chính hãng, hướng dẫn đặt hàng), Out-of-Budget Guardrail (giá sàn 1.890.000 VND), mở rộng Fast Catalog Direct Resolver (màu sắc Unicode tiếng Việt D1, ngân sách), Gemma 4 26B, dọn sạch KV Cache v6. |
 
 
 ---
