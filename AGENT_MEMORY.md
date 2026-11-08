@@ -1449,14 +1449,59 @@ one-store/
   - Deploy thành công lên Cloudflare Workers Live Production (`https://one-store.onestoresportsshoes.workers.dev`).
   - Kiểm thử trực tiếp Live Production (`scripts/test_live_scenarios.ts`): 10/10 câu hỏi thực tế phản hồi chuẩn xác, không còn câu chào rập khuôn, thời gian phản hồi siêu tốc từ 68ms đến 1013ms (trung bình ~400ms, vượt xa yêu cầu <= 5s).
 
+### ADR-59: Thiết Lập Hệ Thống Kịch Bản Chuẩn 100 Câu Hỏi (Ground Truth) & Tối Ưu Toàn Diện Prompt + Pre-Router
+- **Bối cảnh:**
+  - Người dùng yêu cầu chuẩn hóa một bộ kịch bản 100 câu hỏi và câu trả lời dự kiến bám sát cơ sở tri thức đóng (Closed-Domain) của One - Store (70 mẫu giày sneaker chính hãng Âu - Á từ 10 thương hiệu, chính sách đổi trả 7 ngày miễn phí lần đầu, freeship từ 3 đôi hoặc 5tr, bảo hành 6-12 tháng, bảo dưỡng trọn đời, đồng kiểm xỏ thử tận nơi trước khi COD, voucher ONE10, vớ 49k, xịt nano 89k, cẩm nang chọn size dáng chân bè Á Đông...).
+  - Mục đích: Không train model mới mà sử dụng kết hợp Fast Local Pre-Router (0ms) + Prompt Engineering + Dynamic Resolvers + Entity Extraction để đảm bảo chatbot trả lời đúng 100/100 câu hỏi bám sát kịch bản và từ chối khéo léo, dứt khoát các vấn đề ngoài phạm vi.
+- **Kịch Bản Chuẩn 100 Tình Huống (`CHATBOT_100_SCENARIOS.md`):**
+  - Đã xây dựng hoàn chỉnh và được người dùng **phê duyệt** 100 câu hỏi chia thành 8 nhóm nghiệp vụ:
+    1. Nhóm 1: Chào hỏi & Phạm vi hoạt động (Câu 01 - 10)
+    2. Nhóm 2: Chính sách bán hàng, giao vận, đổi trả & bảo hành (Câu 11 - 25)
+    3. Nhóm 3: Cẩm nang kích cỡ & Chọn size dáng chân (Câu 26 - 38)
+    4. Nhóm 4: Tư vấn theo nhu cầu thể thao & Điều kiện sử dụng (Câu 39 - 55)
+    5. Nhóm 5: Tư vấn 10 thương hiệu & Phong cách Lifestyle (Câu 56 - 70)
+    6. Nhóm 6: Tư vấn theo khoảng giá & Ngân sách (Câu 71 - 82)
+    7. Nhóm 7: Quy trình đặt hàng, thu thập thông tin & Tra cứu đơn (Câu 83 - 90)
+    8. Nhóm 8: Xử lý ngoại vi (Out-of-Scope) & Từ chối khéo léo (Câu 91 - 100)
+- **Nâng Cấp Kỹ Thuật Trong `backend/src/chatbot.ts`:**
+  1. **Pre-Router & Guardrails Phân Tuyến Cực Nhanh (0ms):**
+     - Mở rộng Out-of-Scope Guardrail: Từ chối khéo các câu hỏi về tình cảm/người yêu (gợi ý Samba/Dunk Low để đi hẹn hò), tài chính/chứng khoán/giá vàng, thủ đô Pháp (kéo về thương hiệu Salomon của Pháp).
+     - Loại trừ từ khóa đặt hàng khỏi Guardrail để tránh hiểu nhầm khi khách điền form (SĐT, họ tên, địa chỉ).
+     - Phân định rõ `isWarranty` và `isReturn`: Giày bị rách, bung keo, đứt chỉ được định tuyến sang bảo hành kỹ thuật 6-12 tháng và dán keo trọn đời.
+     - Cập nhật `isSmellPolicy` tư vấn thoáng khí, lót OrthoLite và phụ kiện vớ 49k/xịt nano 89k.
+     - Loại trừ `(bảng quy đổi|quy đổi)` khỏi `isReturn` để tránh nuốt câu hỏi quy đổi size US sang EUR.
+     - Hỗ trợ `isSizeByWeight` cho câu hỏi hỏi size theo cân nặng (ví dụ: `65kg thì đi giày size mấy`).
+  2. **Bóc Tách Thực Thể Đặt Hàng Chuẩn Xác (Entity Extraction):**
+     - Sửa regex `nameLabelMatch` và làm sạch tiền tố đại từ (`tôi là`, `mình là`, `em là`, `là`), ngắt trước dấu bullet `•`, `*`, `|`, `\n` và xóa sạch SĐT phía sau.
+     - Sửa `addressLabelMatch`, `colorMatch` ngắt trước các nhãn tiếp theo.
+     - Bóc tách size hỗ trợ định dạng `Size giày: 39` hoặc `sz 42`.
+     - Bổ sung `hasAccessorySock` và `hasAccessorySpray` trong `extractOrderDetails`.
+     - Bổ sung `size` vào `extractProductFilters` để hỗ trợ lọc size chính xác.
+     - Khôi phục sản phẩm từ tin nhắn gần nhất của bot nếu khách đang trong chuỗi điền form mà chưa nhắc lại tên sản phẩm.
+  3. **4 Resolvers Chuyên Sâu Bổ Sung:**
+     - `isDailyShoe`: Tư vấn giày chạy hàng ngày / 360 ngày (loại bỏ hoàn toàn giày đĩa carbon, tập trung dòng đệm bền Pegasus, Ultraboost, Novablast).
+     - `isWinterShoe`: Giày giữ ấm mùa đông (thân da, đệm dày, cổ cao).
+     - `isStandingOrKneeShoe`: Đứng lâu 8 tiếng / giảm áp lực khớp gối (đệm ZoomX Invincible 3, Nimbus 26).
+     - `isBasketballShoe`: Giày bóng rổ bật nhảy, bám sân (Jordan 4, Anta Shock Wave).
+- **Kết Quả Kiểm Thử Toàn Diện:**
+  - Bộ kiểm thử tự động `scripts/test_100_scenarios.ts`: **100/100 ĐẠT (100% PASS)**!
+  - `test_user_scenarios.ts`: 20/20 ĐẠT (100%).
+  - `test_chatbot_closed_domain.ts`: 37/37 ĐẠT (100%).
+  - `test_chatbot_intent_routing.ts`: 26/26 ĐẠT (100%).
+  - `test_chatbot_v2.mjs`: 17/17 ĐẠT (100%).
+  - `npm run typecheck`: 0 lỗi biên dịch TypeScript.
+  - Triển khai Cloudflare Workers Live Production thành công, kiểm thử trực tiếp 10/10 kịch bản phản hồi trung bình ~300ms, 100% Zero-Emoji.
+
 ---
 
 ## 3. DANH SÁCH CÁC FILE ĐÃ THAY ĐỔI
 | Tệp Tin | Trạng Thái | Mô Tả Thay Đổi |
 | :--- | :--- | :--- |
-| `backend/src/chatbot.ts` | Modified | Toàn bộ nâng cấp DSM & ADR-58: Fast Router (smalltalk, size chân to, vóc dáng cao lớn, mua chung, phụ kiện, cân nặng/size, bách khoa out of scope), Brand Switching & Typo aliases, 4 Resolvers + 3 Context Resolvers (trời nắng, gym, thời trang), ngân sách đơn lẻ, Dynamic Fallback Recovery Pool, Cache v7. |
-| `scripts/test_user_scenarios.ts` | Created | Bộ kịch bản kiểm thử tự động 20 tình huống câu hỏi thực tế của khách hàng (100% Pass). |
-| `scripts/test_live_scenarios.ts` | Created | Bộ kiểm thử trực tiếp trên Cloudflare Workers Live Production (`/api/chat`) 10/10 kịch bản thực tế (100% Pass). |
+| `CHATBOT_100_SCENARIOS.md` | Created | Bảng kịch bản 100 câu hỏi và câu trả lời dự kiến chuẩn Ground Truth (được người dùng phê duyệt). |
+| `scripts/test_100_scenarios.ts` | Created | Test suite tự động hóa 100 kịch bản câu hỏi thực tế khách hàng (100/100 PASS). |
+| `backend/src/chatbot.ts` | Modified | Mở rộng Pre-Router, Out-of-Scope Guardrails, Bóc tách thực thể form 1 dòng bullet, 4 Resolvers chuyên sâu, sửa `isReturn`/`isWarranty`, lọc size, Zero-Emoji 100%. |
+| `scripts/test_user_scenarios.ts` | Modified | Bộ kịch bản kiểm thử tự động 20 tình huống câu hỏi thực tế của khách hàng (100% Pass). |
+| `scripts/test_live_scenarios.ts` | Modified | Bộ kiểm thử trực tiếp trên Cloudflare Workers Live Production (`/api/chat`) 10/10 kịch bản thực tế (100% Pass). |
 
 
 ---
