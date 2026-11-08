@@ -595,15 +595,15 @@ export function extractProductFilters(
 
   // 2. Phân loại giày (Category)
   let category: string | null = null;
-  if (/chạy bộ|running|marathon|chạy/i.test(currentLower)) category = 'Running';
-  else if (/bóng rổ|basketball/i.test(currentLower)) category = 'Basketball';
-  else if (/dã ngoại|leo núi|trail|outdoor|trekking/i.test(currentLower)) category = 'Outdoor';
-  else if (/thời trang|lifestyle|dạo phố|casual|đi học|đi làm/i.test(currentLower)) category = 'Lifestyle';
+  if (/chạy bộ|running|marathon|chạy|5km|10km|21km|42km|chạy máy|treadmill/i.test(currentLower)) category = 'Running';
+  else if (/bóng rổ|basketball|bật nhảy/i.test(currentLower)) category = 'Basketball';
+  else if (/dã ngoại|leo núi|trail|outdoor|trekking|phượt/i.test(currentLower)) category = 'Outdoor';
+  else if (/thời trang|lifestyle|dạo phố|casual|đi học|đi làm|sự kiện|sang trọng|tiệc|cưới|lịch sự|trang trọng|mặc váy|váy|đầm|phối đồ|vintage|cổ điển/i.test(currentLower)) category = 'Lifestyle';
   else if (isFollowUp) {
-    if (/chạy bộ|running|marathon|chạy/i.test(historyText)) category = 'Running';
-    else if (/bóng rổ|basketball/i.test(historyText)) category = 'Basketball';
-    else if (/dã ngoại|leo núi|trail|outdoor|trekking/i.test(historyText)) category = 'Outdoor';
-    else if (/thời trang|lifestyle|dạo phố|casual|đi học|đi làm/i.test(historyText)) category = 'Lifestyle';
+    if (/chạy bộ|running|marathon|chạy|5km|10km|21km|42km|chạy máy|treadmill/i.test(historyText)) category = 'Running';
+    else if (/bóng rổ|basketball|bật nhảy/i.test(historyText)) category = 'Basketball';
+    else if (/dã ngoại|leo núi|trail|outdoor|trekking|phượt/i.test(historyText)) category = 'Outdoor';
+    else if (/thời trang|lifestyle|dạo phố|casual|đi học|đi làm|sự kiện|sang trọng|tiệc|cưới|lịch sự|trang trọng|mặc váy|váy|đầm|phối đồ|vintage|cổ điển/i.test(historyText)) category = 'Lifestyle';
   }
 
   // 3. Màu sắc (Color) với Unicode regex hỗ trợ tiếng Việt có dấu
@@ -827,6 +827,20 @@ export function cleanModelOutput(text: string): string {
   cleaned = cleaned.replace(/(?:^|\n+)\s*[-*•]?\s*Direct\s*answer\??[^\n]*/gi, '');
   cleaned = cleaned.replace(/\s*and suggest available ones\.[^\n]*/gi, '');
 
+  // 3.6. Loại bỏ khối tự biên tập / nhẩm tiêu chí tiếng Anh của Gemma 4 ("- Refining for Tone & Constraints:*...")
+  const refiningIdx = cleaned.search(/(?:^|\n)\s*[-*•]?\s*(?:Refining for|Tone & Constraints|Check word count|Check Tone)/i);
+  if (refiningIdx >= 0) {
+    const afterRefining = cleaned.slice(refiningIdx);
+    // Tìm điểm bắt đầu đoạn văn tiếng Việt hoàn thiện sau checklist
+    const vietnameseTurnMatch = afterRefining.match(/\n\s*([A-ZÀ-Ỹ][^\n*•-].*)$/s);
+    if (vietnameseTurnMatch && vietnameseTurnMatch[1].trim().length > 60) {
+      cleaned = vietnameseTurnMatch[1].trim();
+    } else {
+      // Nếu không có đoạn sau, giữ lại đoạn trước khối refining
+      cleaned = cleaned.slice(0, refiningIdx).trim();
+    }
+  }
+
   // 4. Loại bỏ các dòng nhẩm so sánh Keep/Skip
   cleaned = cleaned.replace(/(?:\*\s*[^\n]+(?:\bKeep\b|\bSkip\b)[^\n]*\n*)+/gi, '');
 
@@ -871,7 +885,9 @@ export function cleanModelOutput(text: string): string {
     cleaned = 'Chào bạn! One - Store xin gợi ý các mẫu giày phù hợp với tiêu chí của bạn:\n\n' + cleaned;
   }
 
-  // 8. Định vị câu chào tiếng Việt hoàn chỉnh cuối cùng (loại bỏ sạch các ghi chú nháp tiếng Anh phía trước nếu có)
+  // 8.5. Cắt bỏ rò rỉ metadata kỹ thuật / logprobs nếu có
+  cleaned = cleaned.replace(/,?\s*\}?\s*,?\s*logprobs:null[\s\S]*$/gi, '').trim();
+  cleaned = cleaned.replace(/\{"id":"[^"]+",.*?"content":"/s, '');
   const idxDa = cleaned.lastIndexOf('Dạ chào bạn');
   const idxChao = cleaned.lastIndexOf('Chào bạn');
   const startGreetingIdx = Math.max(idxDa, idxChao);
@@ -911,16 +927,10 @@ export function cleanModelOutput(text: string): string {
   cleaned = cleaned.replace(/"\s*\n\s*\*/g, '\n*');
   cleaned = cleaned.replace(/\n\s*"\s*/g, '\n');
 
-  // 10. Chặn rò rỉ prompt chỉ dẫn kỹ thuật và closed-domain reasoning
-  if (
-    cleaned.includes('Closed-domain') ||
-    cleaned.includes('DANH MỤC GIÀY SẴN CÓ') ||
-    cleaned.includes('TRÍCH ĐOẠN TRI THỨC') ||
-    cleaned.includes('Use *only* provided data') ||
-    cleaned.includes('strict grounding')
-  ) {
-    cleaned = 'Dạ câu hỏi này hiện nằm ngoài phạm vi cơ sở dữ liệu tri thức của One - Store. Em chỉ được cung cấp dữ liệu chính thức về 70 mẫu giày sneaker chính hãng Âu - Á và các chính sách bán hàng của cửa hàng. Bạn có muốn em hỗ trợ tìm kiếm mẫu giày thể thao nào đang có sẵn không ạ?';
-  }
+  // 10. Làm sạch mọi tàn dư của tiêu đề kỹ thuật prompt nếu mô hình vô tình lặp lại
+  cleaned = cleaned.replace(/DANH MỤC GIÀY SẴN CÓ(?:\s+TRONG KHO D1)?/gi, 'kho giày One - Store');
+  cleaned = cleaned.replace(/TRÍCH ĐOẠN TRI THỨC/gi, 'thông tin');
+  cleaned = cleaned.replace(/Closed-domain|strict grounding|Use \*only\* provided data/gi, '');
 
   // 9. Rút gọn các dòng trống dư thừa
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
@@ -1095,7 +1105,7 @@ export function fastLocalRouter(query: string): FastRouteResult {
   if (isSmalltalk) {
     const greetingsList = [
       'Dạ chào bạn! Tư vấn One rất hân hạnh được đồng hành cùng bạn tại One - Store. Bạn đang quan tâm đến mẫu giày chạy bộ, sneaker thời trang nào hay cần One hỗ trợ tư vấn chọn cỡ giày chuẩn dáng chân mình ạ?',
-      'Dạ One xin chào bạn! Rất vui được hỗ trợ bạn hôm nay. Bạn đang tìm mẫu giày cho mục đích chạy bộ marathon, tập gym hay dạo phố thời trang để One tư vấn nhé!',
+      'Dạ One xin chào bạn! Em là trợ lý Tư vấn One, rất vui được hỗ trợ bạn hôm nay. Bạn đang tìm mẫu giày cho mục đích chạy bộ marathon, tập gym hay dạo phố thời trang để One tư vấn nhé!',
       'Dạ chào bạn! Em là trợ lý Tư vấn One. Bạn cần One hỗ trợ kiểm tra size giày theo dáng chân, xem các mẫu sneaker mới nhất hay giải đáp chính sách freeship, đổi size ạ?',
     ];
     const greeting = greetingsList[Math.floor(Math.random() * greetingsList.length)];
@@ -1829,7 +1839,7 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
   // 0. TẦNG ĐỆM CACHE: CLOUDFLARE KV (env.CACHE) (< 30ms)
   const qClean = question.trim();
   const qHash = await hashQuery(qClean);
-  const cacheKey = `chat_cache_v7:${qHash}`;
+  const cacheKey = `chat_cache_v15:${qHash}`;
   if (c.env.CACHE && (!history || history.length === 0)) {
     try {
       const cached = (await c.env.CACHE.get(cacheKey, 'json')) as {
@@ -2230,7 +2240,31 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
   }
 
   const hasSpecificFilter = Boolean(filters.brand || filters.modelKeyword || filters.category || filters.minPrice || filters.maxPrice || filters.color);
-  const sqlQuery = 'SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE ' + whereClauses.join(' AND ') + ' ORDER BY featured DESC, id ASC LIMIT 20';
+
+  // Nhận diện các ngữ cảnh tư vấn phong cách chuyên sâu để ưu tiên thứ tự sản phẩm chuẩn xác
+  const isFormalOrEvent = /(sự kiện|sang trọng|tiệc|cưới|lịch sự|trang trọng|âu phục|blazer|dạ tiệc|hội nghị)/i.test(questionLower);
+  const isDressOutfit = /(mặc váy|váy|đầm|chân váy)/i.test(questionLower);
+  const is5k10k = /(5km|10km|5-10km|5 đến 10km)/i.test(questionLower);
+
+  let orderByClause = 'ORDER BY featured DESC, id ASC';
+  if (isFormalOrEvent) {
+    whereClauses.length = 0;
+    bindParams.length = 0;
+    whereClauses.push("stock > 0 AND category = 'Lifestyle'");
+    orderByClause = "ORDER BY (CASE WHEN name LIKE '%Samba%' OR name LIKE '%Tokuten%' OR name LIKE '%Palermo%' OR name LIKE '%550%' OR name LIKE '%Superstar%' THEN 1 ELSE 2 END) ASC, price DESC";
+  } else if (isDressOutfit) {
+    whereClauses.length = 0;
+    bindParams.length = 0;
+    whereClauses.push("stock > 0 AND category = 'Lifestyle'");
+    orderByClause = "ORDER BY (CASE WHEN name LIKE '%Samba%' OR name LIKE '%530%' OR name LIKE '%Palermo%' OR name LIKE '%Panda%' THEN 1 ELSE 2 END) ASC, price DESC";
+  } else if (is5k10k) {
+    whereClauses.length = 0;
+    bindParams.length = 0;
+    whereClauses.push("stock > 0 AND category = 'Running'");
+    orderByClause = "ORDER BY (CASE WHEN name LIKE '%Pegasus%' OR name LIKE '%Boston%' OR name LIKE '%Novablast%' THEN 1 ELSE 2 END) ASC, price ASC";
+  }
+
+  const sqlQuery = 'SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE ' + whereClauses.join(' AND ') + ' ' + orderByClause + ' LIMIT 20';
 
   const productStmt = c.env.DB.prepare(sqlQuery);
   const productRes = await (bindParams.length > 0 ? productStmt.bind(...bindParams) : productStmt).all();
@@ -2313,50 +2347,33 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
     return;
   }
 
-  // === MŨI NHỌN 1: FAST CATALOG DIRECT RESOLVER (< 80ms, 0 Token LLM) ===
-  // Trực tiếp xử lý câu hỏi hỏi giá tiền, kích cỡ, màu sắc hoặc tìm kiếm danh mục/ngân sách từ CSDL D1
-  const isDirectCatalogQuery =
-    hasSpecificFilter ||
-    /(giá bao nhiêu|nhiêu tiền|bao tiền|có giá|cho xin giá|hỏi giá|giá cả|giá sao|bán giá|bao nhiêu 1 đôi|bao nhiêu một đôi|có size|còn size|còn hàng không|còn mẫu không|tìm đôi|tìm giày|có đôi nào|mẫu nào|đôi nào|dưới|trên|tầm|khoảng|giá rẻ|màu|nên đeo đôi|nên mua đôi|thích màu|đôi.*nào|mẫu.*nào|mua được|triệu|tr\b)/i.test(
-      question.toLowerCase(),
-    );
+  // === MŨI NHỌN 1: FAST SINGLE PRODUCT RESOLVER (< 80ms, 0 Token LLM) ===
+  // Trực tiếp xử lý khi khách hàng hỏi giá tiền hoặc tồn kho của DUY NHẤT 1 sản phẩm cụ thể đã biết tên
+  const isSingleProductInquiry =
+    matchedProducts.length === 1 &&
+    /(giá bao nhiêu|nhiêu tiền|bao tiền|cho xin giá|hỏi giá|còn size|có size|còn hàng không)/i.test(questionLower) &&
+    Boolean(filters.modelKeyword || filters.brand);
 
-  if (isDirectCatalogQuery && matchedProducts.length > 0) {
-    const displayProducts = matchedProducts.slice(0, 4);
-    let fastAnswer = '';
-    if (displayProducts.length === 1) {
-      const p = displayProducts[0];
-      let sizesStr = p.sizes;
-      let colorsStr = p.colors;
-      try { sizesStr = JSON.parse(p.sizes).join(', '); } catch {}
-      try { colorsStr = JSON.parse(p.colors).join(', '); } catch {}
-      fastAnswer = `Dạ chào bạn, tại One - Store mẫu **${p.name}** (${p.category}) chính hãng hiện có giá niêm yết là **${p.price.toLocaleString('vi-VN')} VND**.\n\n- **Tình trạng kho:** Còn sẵn ${p.stock} đôi tại showroom.\n- **Cỡ giày có sẵn:** ${sizesStr}.\n- **Màu sắc:** ${colorsStr}.\n\nKhi đặt mua đôi này, bạn được áp dụng mã voucher **ONE10** giảm ngay 10%, miễn phí ship khi mua từ 3 đôi hoặc hóa đơn từ 5.000.000 VND, và quyền **đồng kiểm, xỏ thử giày tận nơi** trước khi thanh toán COD ạ!`;
-    } else {
-      const itemsList = displayProducts.map((p) => {
-        let sizesStr = p.sizes;
-        let colorsStr = p.colors;
-        try { sizesStr = JSON.parse(p.sizes).join(', '); } catch {}
-        try { colorsStr = JSON.parse(p.colors).join(', '); } catch {}
-        return `- **${p.name}**: **${p.price.toLocaleString('vi-VN')} VND** (Phối màu: ${colorsStr} | Size: ${sizesStr})`;
-      }).join('\n');
+  if (isSingleProductInquiry) {
+    const p = matchedProducts[0];
+    let sizesStr = p.sizes;
+    let colorsStr = p.colors;
+    try { sizesStr = JSON.parse(p.sizes).join(', '); } catch {}
+    try { colorsStr = JSON.parse(p.colors).join(', '); } catch {}
+    const singleAnswer = `Dạ chào bạn, tại One - Store mẫu **${p.name}** (${p.category}) chính hãng hiện có giá niêm yết là **${p.price.toLocaleString('vi-VN')} VND**.\n\n- **Tình trạng kho:** Còn sẵn ${p.stock} đôi tại showroom.\n- **Cỡ giày có sẵn:** ${sizesStr}.\n- **Màu sắc:** ${colorsStr}.\n\nKhi đặt mua đôi này, bạn được áp dụng mã voucher **ONE10** giảm ngay 10%, miễn phí ship khi mua từ 3 đôi hoặc hóa đơn từ 5.000.000 VND, và quyền **đồng kiểm, xỏ thử giày tận nơi** trước khi thanh toán COD ạ!`;
 
-      const extraText = matchedProducts.length > 4 ? `\n\n*(Kho One - Store còn có thêm ${matchedProducts.length - 4} mẫu khác phù hợp tiêu chí của bạn)*` : '';
-      fastAnswer = `Dạ One - Store xin gửi bạn gợi ý các mẫu giày phù hợp với tiêu chí của bạn đang có sẵn tại kho:\n\n${itemsList}${extraText}\n\nToàn bộ sản phẩm đều là hàng phân phối chính hãng 100%, được áp dụng mã ưu đãi **ONE10** giảm 10%, chính sách **đồng kiểm và xỏ thử tại chỗ 100%**, cùng chế độ bảo hành 6-12 tháng chính hãng ạ!`;
-    }
+    const fastSuggested = [p].map(mapToProductCard);
 
-    const fastSuggested = displayProducts.map(mapToProductCard);
-
-    await emitter.delta(fastAnswer);
+    await emitter.delta(singleAnswer);
     await emitter.products(fastSuggested);
     await emitter.chips?.(['Tư vấn chọn size', 'Chính sách freeship', 'Xem thêm mẫu']);
     await emitter.done();
 
-    // Lưu vào KV cache
     if (c.env.CACHE) {
       await c.env.CACHE.put(
         cacheKey,
         JSON.stringify({
-          answer: fastAnswer,
+          answer: singleAnswer,
           products: fastSuggested,
           sources: ['Kho giày chính hãng D1'],
           chips: ['Tư vấn chọn size', 'Chính sách freeship', 'Xem thêm mẫu'],
@@ -2431,30 +2448,21 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
     return;
   }
 
-  // 3. XÂY DỰNG SYSTEM PROMPT PHÂN VAI STRICT CLOSED-DOMAIN (ZERO-HALLUCINATION)
-  const systemPrompt = `BẠN LÀ: "Tư vấn One" — Chuyên viên tư vấn bán hàng thông minh và độc quyền của hệ sinh thái thương mại điện tử One - Store (gọi ngắn gọn là One).
+  // 3. XÂY DỰNG SYSTEM PROMPT PHÂN VAI STRICT CLOSED-DOMAIN (ZERO-HALLUCINATION) & TƯ VẤN CÓ TÂM, CẢM XÚC
+  const systemPrompt = `BẠN LÀ: "Tư vấn One" — Chuyên viên tư vấn bán hàng thời trang & sneaker cao cấp độc quyền của hệ sinh thái One - Store (gọi ngắn gọn là One).
 
-QUY ĐỊNH BẮT BUỘC VỀ PHẠM VI TRI THỨC ĐÓNG BĂNG (CLOSED-DOMAIN STRICT GROUNDING):
+TÂM THẾ & PHONG CÁCH TƯ VẤN (BẮT BUỘC):
+1. ĐỒNG CẢM & THẤU HIỂU KHÁCH HÀNG: Hãy lắng nghe thật kỹ câu hỏi của khách hàng. Luôn mở đầu bằng sự thấu hiểu chân thành về hoàn cảnh sử dụng hoặc mong muốn của khách (ví dụ: đi sự kiện cần sự sang trọng và lịch thiệp; chạy bộ cần sự êm ái bảo vệ khớp; đi mưa cần an toàn bám đường; mặc váy hoặc phối đồ cần trẻ trung tôn dáng).
+2. TƯ VẤN CÓ GU THẨM MỸ & GIẢI THÍCH TINH TẾ: Chọn lọc 2 đến 3 mẫu giày phù hợp nhất từ [DANH MỤC GIÀY SẴN CÓ TRONG KHO D1]. Giải thích ngắn gọn lý do vì sao mẫu đó lại đáp ứng đúng mong muốn của khách (ví dụ: chất liệu da cao cấp, phom dáng gọn gàng, bộ đệm đàn hồi, phối màu nhã nhặn).
+3. VĂN PHONG TỰ NHIÊN, ẤM ÁP, THÂN THIỆN: Trò chuyện như một chuyên viên tư vấn giày cao cấp thực thụ, xưng "One" hoặc "Em" và gọi "bạn" hoặc "quý khách". Tuyệt đối không dùng văn mẫu rập khuôn, không lặp lại nguyên văn các câu chào máy móc.
+4. ĐỘ DÀI LÝ TƯỞNG: Khoảng 2-3 đoạn văn ngắn gọn, súc tích (100 - 160 từ), mạch lạc, dễ đọc.
+5. ZERO-EMOJI 100%: TUYỆT ĐỐI KHÔNG SỬ DỤNG BẤT KỲ BIỂU TƯỢNG CẢM XÚC (EMOJI) NÀO trong toàn bộ câu trả lời.
+
+QUY TẮC DỮ LIỆU CHÍNH HÃNG (CLOSED-DOMAIN STRICT GROUNDING):
 1. BẠN LÀ MỘT TRỢ LÝ ĐÓNG BĂNG PHẠM VI (CLOSED-DOMAIN AI). BẠN TUYỆT ĐỐI CHỈ ĐƯỢC PHÉP SỬ DỤNG DUY NHẤT 2 NGUỒN DỮ LIỆU ĐƯỢC CẤP TRONG CONTEXT: [DANH MỤC GIÀY SẴN CÓ TRONG KHO D1] VÀ [TRÍCH ĐOẠN TRI THỨC CHÍNH SÁCH].
-2. NGHIÊM CẤM 100% SỬ DỤNG KIẾN THỨC BÊN NGOÀI THẾ GIỚI: Tuyệt đối không sử dụng kiến thức bên ngoài được huấn luyện trước (Pre-trained knowledge) để trả lời về các chủ đề ngoài One - Store (như ẩm thực, công nghệ, chính trị, quần áo, thời tiết...).
-3. NGHIÊM CẤM BỊA ĐẶT THÔNG SỐ (ZERO-HALLUCINATION): Không tự bịa giá tiền, không tự bịa size, không tự tạo thương hiệu hoặc mẫu giày không có trong danh mục kho D1.
-4. NGUYÊN TẮC THÀNH THẬT: Nếu thông tin không có trong tài liệu được cung cấp hoặc khách hỏi điều mà bạn không tìm thấy dữ liệu đối soát, bạn BẮT BUỘC phải thẳng thắn trả lời: "Dạ thông tin này hiện chưa có trong cơ sở dữ liệu của One - Store ạ..." và lịch sự gợi ý khách hàng tham khảo các dòng giày có sẵn.
-5. One - Store CHỈ KINH DOANH DUY NHẤT: Giày thể thao & Sneaker chính hãng (Âu - Á). Không bán quần áo hay phụ kiện thời trang khác.
-6. 10 THƯƠNG HIỆU PHÂN PHỐI CHÍNH HÃNG:
-   - Âu - Mỹ: Nike, Adidas, Jordan, Puma, New Balance, Salomon, On Running, Hoka One One.
-   - Châu Á: Asics, Mizuno, Li-Ning, Anta.
-7. CHÍNH SÁCH BÁN HÀNG ĐẶC BIỆT:
-   - Miễn phí vận chuyển toàn quốc cho đơn từ 3 đôi hoặc hóa đơn từ 5.000.000 VND (Đơn dưới mức này phí ship 30.000 VND).
-   - Áp dụng mã ưu đãi ONE10 giảm ngay 10% tổng đơn hàng.
-   - Hình thức COD: Khách hàng hoàn toàn được ĐỒNG KIỂM và XỎ THỬ TẬN NƠI trước khi thanh toán.
-   - Đổi size trong vòng 7 ngày miễn phí cước 2 chiều lần đầu tiên.
-   - Bảo hành 6 tháng cho giày marathon Carbon và 12 tháng cho giày Lifestyle/Outdoor; dán keo ép nhiệt trọn đời.
-
-QUY CHUẨN TRÌNH BÀY & XƯNG HÔ (BẮT BUỘC 100%):
-- QUY ĐỊNH TỐC ĐỘ & ĐỘ DÀI: Trả lời trực tiếp bằng tiếng Việt súc tích trong tối đa 3-4 câu ngắn gọn (dưới 150 từ). Tuyệt đối không viết nháp tiếng Anh, không phân tích dàn ý, tập trung ngay vào tư vấn đúng mẫu giày phù hợp từ kho D1.
-- TUYỆT ĐỐI KHÔNG SỬ DỤNG BẤT KỲ KÝ TỰ BIỂU TƯỢNG CẢM XÚC (EMOJI) NÀO TRONG CÂU TRẢ LỜI.
-- Sử dụng xưng hô lịch sự, thân thiện: "One", "Tư vấn One" hoặc "Em" - "Bạn" hoặc "Quý khách".
-- Sử dụng định dạng Markdown rõ ràng: in đậm tên giày, giá tiền VND, gạch đầu dòng phân ý mạch lạc.`;
+2. NGHIÊM CẤM 100% SỬ DỤNG KIẾN THỨC BÊN NGOÀI THẾ GIỚI: Không sử dụng kiến thức bên ngoài phạm vi cửa hàng. Không tự bịa đặt giá tiền hay mẫu giày không có trong kho D1.
+3. 10 THƯƠNG HIỆU PHÂN PHỐI CHÍNH HÃNG: Nike, Adidas, Jordan, Puma, New Balance, Salomon, On Running, Hoka One One, Asics, Mizuno, Li-Ning, Anta.
+4. Điểm nhấn dịch vụ: 100% khách được mở hộp xỏ thử tại chỗ trước khi thanh toán COD, đổi size miễn phí 7 ngày và bảo hành chính hãng.`;
 
   const userPrompt = `CÂU HỎI CỦA KHÁCH HÀNG: ${question}
 
@@ -2497,10 +2505,10 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
   // 4. GỌI MÔ HÌNH LLM (STREAMING HOẶC NON-STREAMING - TỐC ĐỘ CAO <= 3S)
   if (isStream) {
     try {
-      const aiResult = (await c.env.AI.run('@cf/meta/llama-3-8b-instruct', {
+      const aiResult = (await c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
         messages: conversationMessages,
-        max_tokens: 450,
-        temperature: 0.1,
+        max_tokens: 2500,
+        temperature: 0.4,
         stream: true,
       })) as any;
 
@@ -2542,25 +2550,27 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
     }
   } else {
     try {
-      const aiResult = (await c.env.AI.run('@cf/meta/llama-3-8b-instruct', {
+      const aiResult = (await c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
         messages: conversationMessages,
-        max_tokens: 450,
-        temperature: 0.1,
+        max_tokens: 2500,
+        temperature: 0.4,
       })) as any;
 
       const message = aiResult?.choices?.[0]?.message;
       const content = (message?.content || aiResult?.response || aiResult?.text || '').trim();
       const reasoning = message?.reasoning_content ? String(message.reasoning_content) : '';
 
-      if (!content && reasoning) {
-        const extracted = extractAnswerFromReasoning(reasoning);
-        aiResponseText = extracted || '';
-      } else {
+      if (content) {
         aiResponseText = content;
+      } else if (reasoning) {
+        const extracted = extractAnswerFromReasoning(reasoning);
+        aiResponseText = extracted || reasoning;
+      } else {
+        aiResponseText = FALLBACK_RESPONSES[0];
       }
     } catch (err: any) {
       console.error('[Workers AI Error]', err?.message || err);
-      aiResponseText = '';
+      aiResponseText = FALLBACK_RESPONSES[0];
     }
 
     aiResponseText = cleanModelOutput(aiResponseText);
@@ -2709,8 +2719,13 @@ chatbot.post('/chat', async (c) => {
       done: async () => {},
     };
 
-    await processChatPipeline(c, parsed.data, emitter, false);
-    return c.json(result);
+    try {
+      await processChatPipeline(c, parsed.data, emitter, false);
+      return c.json(result);
+    } catch (pipelineErr: any) {
+      console.error('[ProcessChatPipeline Error]', pipelineErr);
+      return c.json({ error: pipelineErr?.message || 'Lỗi xử lý', stack: pipelineErr?.stack }, 500);
+    }
   }
 });
 
@@ -2908,6 +2923,6 @@ chatbot.get('/chat/status', (c) => {
     embedding_model: '@cf/baai/bge-m3',
     vector_dimensions: 1024,
     vector_index: 'ba-khi-knowledge',
-    llm_model: '@cf/meta/llama-3-8b-instruct',
+    llm_model: '@cf/google/gemma-4-26b-a4b-it',
   });
 });

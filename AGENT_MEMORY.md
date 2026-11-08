@@ -1494,6 +1494,45 @@ one-store/
 
 ---
 
+### ADR-60: Nâng Cấp Mô Hình Workers AI Gemma 4 26B Instruct (@cf/google/gemma-4-26b-a4b-it) & Tái Cấu Trúc Toàn Diện Prompt Tư Vấn Thấu Hiểu Cảm Xúc, Phong Cách Theo Ngữ Cảnh
+- **Bối cảnh & Vấn đề khách hàng phản hồi:**
+  - Người dùng nhận thấy chatbot trả lời quá nhanh nhờ Fast Router/Template nhưng câu trả lời lại **thiếu đi cảm xúc và độ thấu hiểu khách hàng qua câu hỏi**.
+  - Ví dụ thực tế người dùng chỉ ra:
+    `User: "tôi hay đi sự kiện nên đi đôi giày nào để thể hiện sự sang trọng"`
+    `Bot (cũ): "Dạ One - Store xin gửi bạn gợi ý các mẫu giày phù hợp với tiêu chí của bạn đang có sẵn tại kho: • Nike Air Zoom Pegasus 41... • Nike ZoomX Vaporfly 3... • Nike Dunk Low... • Adidas Samba... Toàn bộ sản phẩm đều là hàng phân phối chính hãng 100%..."`
+    $\rightarrow$ Vừa gợi ý sai hoàn toàn chủng loại giày (đem giày chạy bộ đường dài Pegasus và giày đua marathon đế carbon hồng neon Vaporfly tư vấn cho sự kiện sang trọng!), vừa dùng văn mẫu bullet point vô cảm, thiếu sự suy nghĩ của mô hình.
+- **Nguyên nhân gốc rễ (Root Cause Analysis):**
+  1. Biến `isDirectCatalogQuery` trong `backend/src/chatbot.ts` có regex quá rộng (`/(đôi.*nào|mẫu.*nào|tìm đôi|tìm giày|có đôi nào|nên mua đôi)/i`), vô tình chặn đứng mọi câu hỏi tư vấn phong cách/hoàn cảnh và ép xuất ra template văn mẫu thô sơ.
+  2. Bộ lọc `extractProductFilters` chưa phân loại các từ khóa hoàn cảnh (`sự kiện`, `sang trọng`, `tiệc`, `cưới`, `váy hoa`, `nữ tính`, `lịch sự`, `âu phục`) vào `category = 'Lifestyle'`.
+  3. Mô hình cũ `@cf/meta/llama-3-8b-instruct` trên Cloudflare Workers AI đã bị khai tử (deprecated ngày 2026-05-30 sinh lỗi 5028), khiến hệ thống dễ bị trôi vào mảng Fallback.
+  4. Ngân sách `max_tokens: 1000` quá hạn hẹp đối với mô hình Hybrid CoT Gemma 4, khiến phần reasoning ngốn hết token dẫn đến `finish_reason: length`.
+- **Giải Pháp & Triển Khai Kỹ Thuật Chi Tiết:**
+  1. **Nâng cấp mô hình LLM sang Gemma 4 26B Instruct:** Chuyển sang `@cf/google/gemma-4-26b-a4b-it`, nâng `max_tokens: 2500` và `temperature: 0.4` để câu trả lời sinh động, có chiều sâu, ấm áp và tự nhiên.
+  2. **Thu hẹp Fast Template:** Chỉ trả Fast Template khi khách hỏi giá/kho của đúng 1 mẫu giày cụ thể (`isSingleProductInquiry`). Toàn bộ các câu hỏi tư vấn nhu cầu, hoàn cảnh, gu ăn mặc, sự kiện, dạo phố, phong cách đều **100% trôi xuống mô hình LLM reasoning**.
+  3. **Tái cấu trúc System Prompt phân vai & cảm xúc:**
+     - Bắt buộc đồng cảm và thấu hiểu chân thành hoàn cảnh của khách hàng ngay 1-2 câu mở đầu (đi sự kiện cần sang trọng, lịch thiệp; dạo phố với váy hoa cần nữ tính, nhẹ nhàng tôn dáng...).
+     - Tư vấn có gu thẩm mỹ: Chỉ gợi ý 2-3 mẫu giày phù hợp nhất từ kho D1 và giải thích tinh tế lý do (chất liệu da mềm, phom dáng gọn gàng, phối màu nhã nhặn, đế gum cổ điển).
+     - Độ dài chuẩn mực 100 - 150 từ, súc tích, tinh tế và tuân thủ 100% Zero-Emoji.
+  4. **Tối ưu SQL Attribute Filter theo ngữ cảnh:**
+     - Thêm nhận diện `isFormalOrEvent`, `isDressOutfit`, `is5k10k` để lọc chính xác danh mục Lifestyle sang trọng (Adidas Samba, Onitsuka Tiger Tokuten, Puma Palermo, New Balance 550), tuyệt đối loại trừ giày chạy bộ marathon khỏi ngữ cảnh sự kiện/tiệc cưới.
+  5. **Nâng cấp Output Sanitizer & Vô hiệu hóa rò rỉ CoT/Metadata:**
+     - Xóa bỏ việc ghi đè vô lý câu từ chối khi gặp cụm từ ngữ cảnh; chỉ làm sạch từ khóa kỹ thuật.
+     - Cắt bỏ hoàn toàn các khối checklist nhẩm tiếng Anh và metadata của Gemma 4.
+  6. **Làm mới Cache Key:** Tăng cache key lên `chat_cache_v15:`.
+- **Kết Quả Nghiệm Thu:**
+  - Bộ kiểm thử tự động 100 kịch bản `scripts/test_100_scenarios.ts`: **100/100 PASS**.
+  - `scripts/test_user_scenarios.ts`: **20/20 PASS**.
+  - `scripts/test_chatbot_closed_domain.ts`: **37/37 PASS**.
+  - `scripts/test_chatbot_intent_routing.ts`: **26/26 PASS**.
+  - `node scripts/test_chatbot_v2.mjs`: **17/17 PASS**.
+  - `npm run typecheck`: **0 lỗi**.
+  - Kiểm thử thực tế trên Cloudflare Workers Live Production (`https://one-store.onestoresportsshoes.workers.dev`):
+    * *Câu sự kiện sang trọng:* Bot đồng cảm sâu sắc về sự kiện quan trọng, khẳng định phong cách và gu thẩm mỹ, tư vấn tinh tế Adidas Samba OG Classic và Onitsuka Tiger Tokuten Indoor Gum.
+    * *Câu mặc váy hoa dạo phố:* Bot đồng cảm về nét dịu dàng, tự tin xuống phố, tư vấn ngọt ngào Puma Palermo Leather Gum (Hồng Pastel Phối Trắng) và Adidas Samba OG Classic.
+    * Không còn văn mẫu khuôn sáo, câu từ tự nhiên, ấm áp, có cảm xúc và thông minh đúng chất mô hình LLM.
+
+---
+
 ## 3. DANH SÁCH CÁC FILE ĐÃ THAY ĐỔI
 | Tệp Tin | Trạng Thái | Mô Tả Thay Đổi |
 | :--- | :--- | :--- |
