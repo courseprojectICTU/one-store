@@ -1414,12 +1414,49 @@ one-store/
 
 ---
 
+### ADR-58: Nâng Cấp Bộ Định Tuyến Thông Minh Toàn Diện & Xử Lý Dứt Điểm 5 Điểm Tối Ưu Thực Tế (Fast Router 0ms, Ngữ Cảnh Chạy Bộ & Ngân Sách Đơn Lẻ)
+- **Thời gian thực hiện:** Tháng 11/2026.
+- **Bối cảnh:**
+  Dựa trên nhật ký tương tác thực tế từ khách hàng (22 lượt chat liên tục), phát hiện 5 điểm cần tinh chỉnh dứt điểm:
+  1. Câu ngắn/câu cụt: *"mua giày"*, *"đặt hàng"*, *"có bán giày không"*, *"shop bán gì"* bị trôi vào fallback hoặc trả về danh sách chưa đúng ý định.
+  2. Phụ kiện bán kèm: *"có bán tất không"*, *"có bán vớ không"*, *"bình xịt"* - khách hỏi phụ kiện thì One - Store chỉ chuyên giày nhưng có chính sách phân phối vớ thể thao dệt kim One Athletic (+49.000đ) và xịt bọt nano vệ sinh giày (+89.000đ) ưu đãi kèm giày.
+  3. Tư vấn size theo cân nặng: Khách hỏi *"cỡ 38 là bao nhiêu cân"*, *"60kg đi size nào"* - giải thích chuẩn quốc tế EUR/US/UK tính theo cm chiều dài/bề rộng chân chứ không tính theo cân nặng.
+  4. Ngữ cảnh chạy bộ chuyên sâu & chuyển đổi sở thích:
+     - *"vậy chạy trời nắng thì sao"*: gợi ý vải dệt kỹ thuật Engineered Mesh thoáng khí (Pegasus 41, Novablast 4, Boston 12).
+     - *"tôi chạy trong phòng tập gym"*: gợi ý giày đế bám sàn cao, độ dốc vừa phải cho máy chạy Treadmill (Anta PG7, Puma Velocity Nitro 3, Puma Voyage Nitro 3 Trail).
+     - *"vậy nếu tôi chọn giày thời trang"*: chuyển ngay sang sneaker dạo phố Lifestyle (Puma Palermo, NB 530, Onitsuka Tokuten, Samba OG).
+  5. Tìm kiếm theo ngân sách đơn lẻ: *"2 triệu thì mua được đôi giày nào"*, *"5 triệu..."* - trước đây do thiếu cờ `isDirectCatalogQuery` nên dù lọc được sản phẩm từ D1 vẫn trôi vào Fallback text hỏi lại khách.
+  6. Mở rộng Out-of-Scope kiến thức bách khoa: Chặn 0ms các câu hỏi tổng quát *"một năm có bao nhiêu ngày"*, *"thủ đô"*, *"dân số"* để giữ vững định vị Closed-Domain chuyên biệt về giày thể thao của One - Store.
+- **Giải pháp & Triển khai chi tiết ([backend/src/chatbot.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/backend/src/chatbot.ts)):**
+  1. **Tối Ưu Fast Local Router (0ms):**
+     - Bổ sung `isAccessoryInquiry`: Trả lời ngay chính sách phân phối vớ One Athletic và bình xịt nano.
+     - Bổ sung `isStoreProductScope`: Khẳng định 70 mẫu sneaker chính hãng 10 thương hiệu Âu - Á.
+     - Bổ sung `isSizeByWeight`: Phân tích nguyên lý size quốc tế theo cm, hướng dẫn 3 bước đo chân.
+     - Mở rộng `isHowToOrder`: Bắt cụm từ ngắn *"đặt hàng"*, *"hướng dẫn đặt hàng"*.
+     - Mở rộng `isSmalltalk`: Bắt *"mua giày"*, xoay vòng 3 biến thể câu chào thân thiện.
+     - Mở rộng `isOutOfScope`: Bắt *"một năm có bao nhiêu ngày"*, kiến thức bách khoa, từ chối lịch sự và chuyển hướng về sneaker.
+  2. **Tối Ưu Ngữ Cảnh Chạy Bộ & Chuyển Đổi Nhu Cầu (< 80ms, 0 Token LLM):**
+     - Nhận diện `isSunnyShoe` (`trời nắng`, `mùa hè`, `thoáng khí`): Trả lời tiêu chí thông thoáng & đính kèm 3 siêu phẩm Engineered Mesh.
+     - Nhận diện `isGymShoe` (`phòng gym`, `tập gym`, `chạy máy`, `treadmill`): Trả lời tiêu chí bám sàn, êm gót & đính kèm 3 mẫu giày đa năng tối ưu máy chạy.
+     - Nhận diện `isFashionShoe` (`chọn giày thời trang`, `lifestyle`, `dạo phố`): Trả lời gợi ý phối đồ & đính kèm 4 mẫu sneaker kinh điển nhất.
+  3. **Đồng Bộ Bộ Lọc Ngân Sách Đơn Lẻ:**
+     - Kích hoạt `isDirectCatalogQuery = true` khi `hasSpecificFilter === true`.
+     - Loại bỏ hoàn toàn tình trạng trôi vào Fallback recovery text khi đã tìm thấy sản phẩm.
+     - Định dạng trực tiếp danh sách sản phẩm tìm được kèm size, màu sắc và đính kèm thẻ sản phẩm tương tác (`suggestedProducts`).
+- **Kết Quả Nghiệm Thu:**
+  - 100% test suites Pass: `test_user_scenarios.ts` (20/20 criteria), `test_chatbot_closed_domain.ts` (37/37 criteria), `test_chatbot_intent_routing.ts` (26/26 criteria), `test_chatbot_v2.mjs` (17/17 criteria).
+  - Biên dịch TypeScript `npm run typecheck` đạt 0 lỗi.
+  - Deploy thành công lên Cloudflare Workers Live Production (`https://one-store.onestoresportsshoes.workers.dev`).
+  - Kiểm thử trực tiếp Live Production (`scripts/test_live_scenarios.ts`): 10/10 câu hỏi thực tế phản hồi chuẩn xác, không còn câu chào rập khuôn, thời gian phản hồi siêu tốc từ 68ms đến 1013ms (trung bình ~400ms, vượt xa yêu cầu <= 5s).
+
+---
+
 ## 3. DANH SÁCH CÁC FILE ĐÃ THAY ĐỔI
 | Tệp Tin | Trạng Thái | Mô Tả Thay Đổi |
 | :--- | :--- | :--- |
-| `backend/src/chatbot.ts` | Modified | Toàn bộ nâng cấp DSM: Fast Router (smalltalk, size chân to, vóc dáng cao lớn, mua chung), Brand Switching & Typo aliases, 4 Resolvers (đắt nhất, rẻ nhất, đi mưa GORE-TEX, ngân sách lớn), mô hình Llama 3 8B Instruct, Dynamic Fallback Recovery Pool, Cache v7. |
-| `scripts/test_user_scenarios.ts` | Created | Bộ kịch bản kiểm thử tự động 10 tình huống câu hỏi thực tế của khách hàng. |
-| `scripts/test_live_production.ts` | Created | Bộ kiểm thử trực tiếp trên Cloudflare Workers Live Production (`/api/chat`). |
+| `backend/src/chatbot.ts` | Modified | Toàn bộ nâng cấp DSM & ADR-58: Fast Router (smalltalk, size chân to, vóc dáng cao lớn, mua chung, phụ kiện, cân nặng/size, bách khoa out of scope), Brand Switching & Typo aliases, 4 Resolvers + 3 Context Resolvers (trời nắng, gym, thời trang), ngân sách đơn lẻ, Dynamic Fallback Recovery Pool, Cache v7. |
+| `scripts/test_user_scenarios.ts` | Created | Bộ kịch bản kiểm thử tự động 20 tình huống câu hỏi thực tế của khách hàng (100% Pass). |
+| `scripts/test_live_scenarios.ts` | Created | Bộ kiểm thử trực tiếp trên Cloudflare Workers Live Production (`/api/chat`) 10/10 kịch bản thực tế (100% Pass). |
 
 
 ---
