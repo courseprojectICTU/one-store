@@ -1376,7 +1376,50 @@ one-store/
 | `docs/KE_HOACH_NANG_CAP_CHATBOT_CLOSED_DOMAIN_VA_FAST_ROUTING.md` | Created | Bản kế hoạch kỹ thuật kiến trúc 4 tầng bảo vệ Defense-in-Depth, Closed-Domain AI và Fast Routing 5 chính sách 0ms. |
 | `scripts/test_chatbot_closed_domain.ts` | Created | Bộ kiểm thử tự động 37/37 tiêu chí xác thực Closed-Domain Guardrails, Fast Router 5 chính sách 0ms, Zero-Emoji và Knowledge Gatekeeper. |
 | `backend/src/chatbot.ts` | Modified | Nâng cấp Closed-Domain AI v2.2 & Tối ưu hiệu năng $\le$ 2s: Fast Catalog Direct Resolver 0ms (< 80ms), Cloudflare KV Cache (`env.CACHE`), mô hình Llama 3.1 8B Instruct, `max_tokens: 350`, `temperature: 0.1`. |
-| `backend/src/chatbot.ts` | Modified | Khắc phục triệt để lỗi rập khuôn AI Chatbot: Fast Local Router (toán học, cam kết chính hãng, hướng dẫn đặt hàng), Out-of-Budget Guardrail (giá sàn 1.890.000 VND), mở rộng Fast Catalog Direct Resolver (màu sắc Unicode tiếng Việt D1, ngân sách), Gemma 4 26B, dọn sạch KV Cache v6. |
+### ADR-35: Nâng Cấp Toàn Diện Fast Dialogue State Management (DSM), Loại Bỏ Hoàn Toàn Lỗi Rập Khuôn 10 Thương Hiệu & Tối Ưu Tốc Độ Phản Hồi Chatbot <= 1.5s
+- **Bối cảnh:**
+  1. Khi người dùng kiểm thử thực tế với các câu hỏi thường gặp của khách hàng, Chatbot "Tư vấn One" liên tục bị trả về câu chào rập khuôn 10 thương hiệu:
+     - Câu *"chào"* đơn lẻ bị miss regex và trôi xuống LLM.
+     - Các câu hỏi siêu phẩm *"tìm cho tôi đôi giày đắt nhất"*, *"đôi giày rẻ nhất"* không có bộ lọc SQL tương ứng.
+     - Câu hỏi ngân sách lớn *"giày từ 9-10 triệu"*, *"tôi có 30 triệu thì mua đôi giày nào"* vượt trần kho D1 (trần hiện tại là 6.290.000đ của Asics Metaspeed Sky Paris). Do thiếu điều kiện `minPrice` trong SQL, hệ thống quét trúng toàn bộ danh mục hoặc fallback.
+     - Câu *"chân tôi to đeo cỡ nào"* bị miss do có chữ "tôi" xen giữa.
+     - Câu *"tôi 30 tuổi hay đi chạy bộ tôi có 3 bộ sưu tập giay nike rồi giờ tôi muốn đổi gió sang adidat thì mua đôi nào"* bị nhận diện nhầm sang Nike do dính chữ "nike" và typo "adidat".
+     - Câu hỏi trời mưa *"nay trời mưa thì đi đôi giày nào"* không kích hoạt danh mục GORE-TEX / Trail chuyên dụng.
+     - Mô hình Workers AI `Gemma 4 26B` khi streaming trả về reasoning chunks rỗng dẫn đến rớt vào câu fallback cứng nhắc liệt kê 10 thương hiệu.
+- **Giải pháp & Triển khai chi tiết ([backend/src/chatbot.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/backend/src/chatbot.ts)):**
+  1. **Mở Rộng Fast Local Router (0ms):**
+     - Mở rộng regex Smalltalk bắt trọn từ `"chào"`, `"chào shop"`, `"chào bạn"`, `"ad ơi"`, `"shop ơi"`.
+     - Bổ sung nhận diện Cẩm nang chọn size chân to/bè/dày/dài: `chân.*to|chân.*bè|chân.*dày|chân.*dài|chân tôi|chân em`.
+     - Bổ sung nhận diện Vóc dáng cao lớn: `cao\s*1?m[89]\d|cao\s*m98|chiều cao` tư vấn đệm dày bảo vệ khớp gối (Nike Invincible 3, Ultraboost, Novablast 4).
+     - Bổ sung nhận diện Ý định mua chung: `tôi muốn mua giày`, `cần mua giày`, `tư vấn giày cho tôi`.
+  2. **Chuẩn Hóa Typo Thương Hiệu & Brand Switching trong `extractProductFilters`:**
+     - Tích hợp `brandAliases` tự động ánh xạ lỗi gõ sai telex (`adidat`, `adida`, `das` -> `Adidas`, `nai ki` -> `Nike`...).
+     - Xây dựng cơ chế Brand Switching: Nhận diện cấu trúc *"đổi gió sang..."*, *"chuyển sang..."*, *"mua..."* để gán đúng thương hiệu đích; đồng thời loại trừ thương hiệu nằm sau *"đã có"*, *"bộ sưu tập"*.
+  3. **Tích Hợp 4 Resolver Nghiệp Vụ Chuyên Sâu (< 80ms, 0 Token LLM):**
+     - **Giày đắt nhất / giá cao nhất / VIP nhất:** Truy vấn D1 `ORDER BY price DESC LIMIT 3`, trả lời chi tiết và gợi ý bộ 3 siêu phẩm Carbon (Asics Metaspeed Sky Paris Carbon 6.290.000đ, Adidas Adizero Adios Pro 3 5.990.000đ, Nike ZoomX Vaporfly 3 5.890.000đ).
+     - **Giày rẻ nhất / tiết kiệm nhất:** Truy vấn D1 `ORDER BY price ASC LIMIT 2`, trả lời chi tiết và gợi ý Anta Walker Retro Casual (1.890.000đ) & Puma Suede Classic XXI (1.990.000đ).
+     - **Giày đi mưa / chống nước GORE-TEX / địa hình Trail:** Nhận diện `trời mưa|đi mưa|chống nước|gore-tex|trơn trượt`, truy vấn sản phẩm có `GORE-TEX`, `Trail`, `Speedcross` hoặc category `Outdoor` (Salomon ACS Pro, Salomon XT-6, Salomon Speedcross 6, Nike Pegasus Trail 4 GORE-TEX).
+     - **Ngân sách lớn / vượt trần (> 6.290.000đ hoặc 30 triệu):** Bóc tách `minPrice > 6.290.000` hoặc pattern `(\d{2,3})\s*triệu`, thông báo giá trần hiện tại của kho là 6.290.000đ, tư vấn khách hàng sở hữu combo 2-5 đôi sneaker đỉnh cao thế giới phục vụ đa dạng nhu cầu (marathon, gym, thời trang).
+  4. **Chuyển Đổi Mô Hình LLM sang `@cf/meta/llama-3-8b-instruct`:**
+     - Tốc độ cực nhanh (latency < 1.5s), luồng stream SSE trực tiếp token sạch không chứa reasoning loop.
+     - Cấu hình `max_tokens: 450`, `temperature: 0.1`.
+  5. **Xóa Bỏ Hoàn Toàn Câu Fallback 10 Thương Hiệu — Thay Bằng Dynamic Fallback Recovery Pool:**
+     - Thay thế câu trả lời rập khuôn 10 thương hiệu bằng pool 3 biến thể xoay vòng ngẫu nhiên, tập trung lắng nghe và khai thác dáng chân, nhu cầu chạy bộ/dạo phố hoặc ngân sách của khách.
+     - Loại bỏ việc ghi cache KV đối với các câu trả lời thuộc pool fallback.
+  6. **Làm Mới Toàn Bộ Bộ Đệm Cache:**
+     - Nâng cấp tiền tố khóa lưu trữ Cloudflare KV lên `chat_cache_v7:${qHash}`.
+  7. **Kết Quả Nghiệm Thu:**
+     - 100% test suites Pass: `test_chatbot_closed_domain.ts` (37/37 criteria), `test_chatbot_intent_routing.ts` (26/26 criteria), `test_chatbot_v2.mjs` (17/17 criteria), `test_user_scenarios.ts` (10/10 scenarios).
+     - Kiểm thử Live Production (`test_live_production.ts`): Cả 10 câu hỏi thực tế của khách hàng đều phản hồi cực nhanh (< 1.5s), thông tin chuẩn xác với kho D1, tỷ lệ không chứa rập khuôn đạt 10/10 (100%).
+
+---
+
+## 3. DANH SÁCH CÁC FILE ĐÃ THAY ĐỔI
+| Tệp Tin | Trạng Thái | Mô Tả Thay Đổi |
+| :--- | :--- | :--- |
+| `backend/src/chatbot.ts` | Modified | Toàn bộ nâng cấp DSM: Fast Router (smalltalk, size chân to, vóc dáng cao lớn, mua chung), Brand Switching & Typo aliases, 4 Resolvers (đắt nhất, rẻ nhất, đi mưa GORE-TEX, ngân sách lớn), mô hình Llama 3 8B Instruct, Dynamic Fallback Recovery Pool, Cache v7. |
+| `scripts/test_user_scenarios.ts` | Created | Bộ kịch bản kiểm thử tự động 10 tình huống câu hỏi thực tế của khách hàng. |
+| `scripts/test_live_production.ts` | Created | Bộ kiểm thử trực tiếp trên Cloudflare Workers Live Production (`/api/chat`). |
 
 
 ---

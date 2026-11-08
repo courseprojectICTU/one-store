@@ -510,6 +510,25 @@ export function extractProductFilters(
       };
     }
 
+    // TH 4: Mức ngân sách đơn lẻ (ví dụ: "có 30 triệu", "tài chính 30 triệu", "ngân sách 30 triệu", "tầm 3 triệu", "khoảng 3 triệu", "30 triệu")
+    const budget = str.match(
+      /(?:có|ngân sách|tài chính|tầm|khoảng|mức giá)?\s*(\d+(?:[.,]\d+)?)\s*(triệu|tr)\b/i,
+    );
+    if (budget) {
+      const val = parseFloat(budget[1].replace(',', '.')) * 1000000;
+      if (val > 6290000) {
+        return {
+          min: val,
+          max: val,
+        };
+      } else {
+        return {
+          min: Math.max(1800000, val - 600000),
+          max: val + 600000,
+        };
+      }
+    }
+
     return null;
   };
 
@@ -553,33 +572,53 @@ export function extractProductFilters(
     }
   }
 
-  // 4. Thương hiệu (Brand) với Unicode regex
+  // 4. Thương hiệu (Brand) với Unicode regex, Typo correction & Brand Switching
   let brand: string | null = null;
-  const brandsList = [
-    'Nike',
-    'Adidas',
-    'Asics',
-    'Mizuno',
-    'New Balance',
-    'Salomon',
-    'Puma',
-    'Jordan',
-    'Hoka',
-    'On Running',
-    'Onitsuka Tiger',
-    'Li-Ning',
-    'Anta',
+  const brandAliases: Array<{ pattern: RegExp; brand: string }> = [
+    { pattern: /(?:adidat|adida|didas|das|adidas)/i, brand: 'Adidas' },
+    { pattern: /(?:nai ki|naiki|nike)/i, brand: 'Nike' },
+    { pattern: /(?:axic|asic|asics)/i, brand: 'Asics' },
+    { pattern: /(?:mizuno)/i, brand: 'Mizuno' },
+    { pattern: /(?:new balance|newbalance|nb)/i, brand: 'New Balance' },
+    { pattern: /(?:salomon)/i, brand: 'Salomon' },
+    { pattern: /(?:pupa|puma)/i, brand: 'Puma' },
+    { pattern: /(?:jordan)/i, brand: 'Jordan' },
+    { pattern: /(?:hoka)/i, brand: 'Hoka' },
+    { pattern: /(?:on running|onrunning)/i, brand: 'On Running' },
+    { pattern: /(?:onitsuka|onitsuka tiger)/i, brand: 'Onitsuka Tiger' },
+    { pattern: /(?:li-ning|lining|li ning)/i, brand: 'Li-Ning' },
+    { pattern: /(?:anta)/i, brand: 'Anta' },
   ];
-  for (const b of brandsList) {
-    if (new RegExp(`(?:^|[^\\p{L}\\p{N}])${b}(?=[^\\p{L}\\p{N}]|$)`, 'ui').test(currentLower)) {
-      brand = b;
-      break;
+
+  // A. Kiểm tra ý định chuyển đổi thương hiệu (ví dụ: "đổi gió sang adidat", "chuyển sang adidas", "muốn thử puma", "sang nike")
+  const switchMatch = currentLower.match(/(?:đổi gió sang|chuyển sang|thử sang|mua|lấy|quan tâm|tìm|sang|qua)\s+([a-zA-Z\s-]+)/i);
+  if (switchMatch) {
+    const targetPhrase = switchMatch[1];
+    for (const item of brandAliases) {
+      if (item.pattern.test(targetPhrase)) {
+        brand = item.brand;
+        break;
+      }
     }
   }
+
+  // B. Nếu chưa có brand từ switchMatch, quét thông thường nhưng loại trừ brand nằm trong mệnh đề "đã có" / "bộ sưu tập"
+  if (!brand) {
+    for (const item of brandAliases) {
+      if (item.pattern.test(currentLower)) {
+        const negPattern = new RegExp(`(?:đã có|bộ sưu tập|đang đi|có\\s+\\d+\\s+(?:đôi|bộ))\\s+[^,.]*?${item.brand.toLowerCase()}`, 'i');
+        if (!negPattern.test(currentLower)) {
+          brand = item.brand;
+          break;
+        }
+      }
+    }
+  }
+
   if (!brand && isFollowUp) {
-    for (const b of brandsList) {
-      if (new RegExp(`(?:^|[^\\p{L}\\p{N}])${b}(?=[^\\p{L}\\p{N}]|$)`, 'ui').test(historyText)) {
-        brand = b;
+    for (const item of brandAliases) {
+      if (item.pattern.test(historyText)) {
+        brand = item.brand;
         break;
       }
     }
@@ -917,7 +956,7 @@ export function fastLocalRouter(query: string): FastRouteResult {
 
   // 3. TẦNG BẢO VỆ 1C: FAST OUT-OF-SCOPE GUARDRAIL (0 ms) — BÁM SÁT CHỦ ĐỀ
   const isOutOfScope =
-    /(cà phê|coffee|trà sữa|trà đào|nước ngọt|bia|rượu|nấu ăn|món ăn|công thức món|quán ăn|nhà hàng|thực phẩm|đồ ăn|thời tiết|nhiệt độ|trời mưa|dự báo thời tiết|giải toán|viết code|lập trình|python|javascript|java|c\+\+|html|css|sửa máy tính|laptop|điện thoại|iphone|samsung|quần áo|áo sơ mi|áo khoác|áo len|áo thun|áo phông|áo hoodie|áo polo|áo dài|áo croptop|áo chống nắng|áo ba lỗ|quần jean|quần short|quần đùi|quần bò|quần kaki|quần tây|quần dài|quần ống rộng|quần jogger|quần lót|váy|đầm|suit|vest|chân váy|nón|mũ|kính mát|kính râm|thắt lưng|dây nịt|túi xách|ví da|đồng hồ|mỹ phẩm|son môi|kem dưỡng|nước hoa|trang sức|xe máy|ô tô|phim ảnh|diễn viên|ca sĩ|bài hát|chính trị|tin tức xã hội|bitcoin|crypto|tiền ảo|chứng khoán)/i.test(q) &&
+    /(cà phê|coffee|trà sữa|trà đào|nước ngọt|bia|rượu|nấu ăn|món ăn|công thức món|quán ăn|nhà hàng|thực phẩm|đồ ăn|thời tiết|thời triết|thái nguyên|thái nuyên|nhiệt độ|dự báo thời tiết|giải toán|viết code|lập trình|python|javascript|java|c\+\+|html|css|sửa máy tính|laptop|điện thoại|iphone|samsung|quần áo|áo sơ mi|áo khoác|áo len|áo thun|áo phông|áo hoodie|áo polo|áo dài|áo croptop|áo chống nắng|áo ba lỗ|quần jean|quần short|quần đùi|quần bò|quần kaki|quần tây|quần dài|quần ống rộng|quần jogger|quần lót|váy|đầm|suit|vest|chân váy|nón|mũ|kính mát|kính râm|thắt lưng|dây nịt|túi xách|ví da|đồng hồ|mỹ phẩm|son môi|kem dưỡng|nước hoa|trang sức|xe máy|ô tô|xô tô|phim ảnh|diễn viên|ca sĩ|bài hát|chính trị|tin tức xã hội|bitcoin|crypto|tiền ảo|chứng khoán)/i.test(q) &&
     !/(giày|sneaker|chạy bộ|marathon|bóng rổ|dã ngoại|asics|nike|adidas|mizuno|puma|new balance|salomon|hoka|li-ning|anta|jordan)/i.test(q);
 
   if (isOutOfScope) {
@@ -928,8 +967,10 @@ export function fastLocalRouter(query: string): FastRouteResult {
       specificMsg = 'Dạ One - Store là đơn vị chuyên phân phối độc quyền các dòng giày thể thao và sneaker chính hãng Âu - Á, cửa hàng hiện không kinh doanh các mặt hàng quần áo thời trang khác ạ. Bạn có muốn One hỗ trợ tìm kiếm mẫu giày thể thao nào đang có sẵn không ạ?';
     } else if (/(viết code|lập trình|python|javascript|giải toán|sửa máy tính)/i.test(q)) {
       specificMsg = 'Dạ em là trợ lý bán hàng thời trang thể thao nên không hỗ trợ viết code hoặc giải bài toán kỹ thuật được ạ. Bạn có cần One hỗ trợ chọn cỡ giày chuẩn theo dáng chân mình không ạ?';
-    } else if (/(thời tiết|nhiệt độ|trời mưa|dự báo thời tiết)/i.test(q)) {
+    } else if (/(thời tiết|thời triết|thái nguyên|thái nuyên|nhiệt độ|dự báo thời tiết)/i.test(q)) {
       specificMsg = 'Dạ em không có dữ liệu dự báo thời tiết trực tuyến ạ. Em là trợ lý chuyên biệt về 70 mẫu sneaker chính hãng Âu - Á tại One - Store. Bạn có cần One tư vấn mẫu giày nào phù hợp đi mưa hay dã ngoại không ạ?';
+    } else if (/(ô tô|xô tô|xe máy)/i.test(q)) {
+      specificMsg = 'Dạ One - Store chỉ phân phối giày thể thao & sneaker chính hãng Âu - Á, không kinh doanh phương tiện giao thông ô tô hay xe máy ạ! Bạn có muốn One gợi ý mẫu giày thể thao nào đang có sẵn không ạ?';
     }
 
     return {
@@ -967,7 +1008,7 @@ export function fastLocalRouter(query: string): FastRouteResult {
 
   // 4. Nhận diện các câu chào hỏi xã giao, cảm ơn (Smalltalk)
   const isSmalltalk =
-    /^(xin chào|chào shop|chào bạn|chào em|chào ad|chào bot|hello|hi|hey|alo|shop ơi|bot ơi)(\s+(shop|ad|em|bot|bạn|nha|nhé|ơi))*[\s!.,?~]*$/i.test(q) ||
+    /^(chào|xin chào|chào shop|chào bạn|chào em|chào ad|chào bot|hello|hi|hey|alo|shop ơi|bot ơi|ad ơi|em ơi|shop|ad)(\s+(shop|ad|em|bot|bạn|nha|nhé|ơi))*[\s!.,?~]*$/i.test(q) ||
     /^(cảm ơn|cám ơn|thank you|thanks|tạm biệt|bye)(\s+(shop|ad|em|bot|bạn|nhiều|nha|nhé))*[\s!.,?~]*$/i.test(q);
 
   if (isSmalltalk) {
@@ -975,6 +1016,19 @@ export function fastLocalRouter(query: string): FastRouteResult {
       type: 'smalltalk',
       answer: 'Dạ chào bạn! Tư vấn One rất hân hạnh được đồng hành cùng bạn tại One - Store. Bạn đang quan tâm đến mẫu giày chạy bộ, sneaker thời trang nào hay cần One hỗ trợ tư vấn chọn cỡ giày chuẩn dáng chân mình ạ?',
       chips: ['Tìm giày chạy bộ', 'Chân bè chọn size nào', 'Chính sách đổi trả', 'Phí vận chuyển COD'],
+    };
+  }
+
+  // 4.5. NHẬN DIỆN Ý ĐỊNH MUA HÀNG CHUNG CHUNG ("tôi muốn mua giày", "cần mua giày")
+  const isGeneralBuy =
+    /^(tôi\s+)?(muốn|cần|tìm|hỏi)\s+mua\s+(giày|sneaker|đôi giày|đôi sneaker)/i.test(q) ||
+    /^(tư vấn|giới thiệu)\s+(giày|sneaker|giúp tôi|cho tôi)/i.test(q);
+
+  if (isGeneralBuy) {
+    return {
+      type: 'smalltalk',
+      answer: 'Dạ chào bạn! One - Store rất hân hạnh được đồng hành và tư vấn cho bạn. Cửa hàng hiện phân phối độc quyền 70 mẫu giày thể thao & sneaker chính hãng từ 10 thương hiệu hàng đầu thế giới (Nike, Adidas, Asics, Mizuno, New Balance, Salomon, Puma, Hoka, Li-Ning, Anta).\n\nĐể One gợi ý mẫu giày chuẩn xác và ưng ý nhất, bạn có thể chia sẻ thêm cho One:\n- **Mục đích sử dụng chính:** Chạy bộ marathon, tập gym, đi chơi/đi làm thời trang, hay đi dã ngoại leo núi?\n- **Khoảng giá hoặc thương hiệu bạn đang quan tâm?**\n\nNgoài ra, bạn cũng có thể bấm chọn nhanh các gợi ý bên dưới để khám phá ngay nhé!',
+      chips: ['Giày chạy bộ bán chạy', 'Sneaker thời trang hot', 'Giày dã ngoại đi mưa', 'Mã giảm giá ONE10'],
     };
   }
 
@@ -1056,16 +1110,29 @@ export function fastLocalRouter(query: string): FastRouteResult {
     };
   }
 
-  // 11. CẨM NANG ĐO KÍCH THƯỚC BÀN CHÂN & TƯ VẤN CHÂN BÈ (0 ms)
+  // 11. CẨM NANG ĐO KÍCH THƯỚC BÀN CHÂN & TƯ VẤN CHÂN BÈ / CHÂN TO (0 ms)
   const isSizeGuide =
-    /(cách đo chân|hướng dẫn đo chân|đo bàn chân|bảng quy đổi size|chân bè|chân to|bảng size|chọn size thế nào)/i.test(q) &&
+    /(cách đo chân|hướng dẫn đo chân|đo bàn chân|bảng quy đổi size|chân.*bè|chân.*to|chân.*dày|chân.*dài|chân tôi|chân em|bảng size|chọn size|cỡ nào|size nào|đeo cỡ nào|đi cỡ nào|mang cỡ nào|chân to|chân bè)/i.test(q) &&
     !/(đặt|chốt|tôi lấy đôi)/i.test(q);
 
   if (isSizeGuide) {
     return {
       type: 'policy_sizeguide',
-      answer: 'Dạ để chọn được size giày vừa vặn chuẩn xác nhất, bạn có thể áp dụng cẩm nang đo chân 3 bước của One - Store:\n\n1. **Bước 1:** Đặt tờ giấy A4 sát mép tường, đặt bàn chân lên giấy sao cho gót chân chạm nhẹ vào tường.\n2. **Bước 2:** Dùng bút đánh dấu điểm đầu ngón chân dài nhất trên giấy.\n3. **Bước 3:** Dùng thước đo khoảng cách từ mép tường đến điểm đánh dấu (tính bằng cm) rồi tra bảng size chuẩn EUR.\n\n**Mẹo chọn giày cho dáng chân Á Đông:**\n- Nếu bạn có **bàn chân bè ngang hoặc mu bàn chân dày**, bạn nên **tăng từ 0.5 đến 1 size** so với kích thước tiêu chuẩn, hoặc ưu tiên chọn các dòng giày phom rộng Wide 2E/4E của Asics, Mizuno hay Li-Ning để các ngón chân cử động thoải mái nhất nhé!',
-      chips: ['Bảng quy đổi size', 'Mẫu giày cho chân bè', 'Xem giày Asics'],
+      answer: 'Dạ để chọn được cỡ giày vừa vặn và thoải mái nhất cho dáng chân của mình, One - Store xin chia sẻ cẩm nang 3 bước chuẩn xác sau:\n\n1. **Cách đo kích thước bàn chân:** Đặt bàn chân lên tờ giấy sát mép tường, đánh dấu điểm dài nhất của ngón chân rồi đo khoảng cách từ tường đến điểm đánh dấu (tính bằng cm) để tra bảng size chuẩn EUR.\n2. **Tư vấn cho người có bàn chân to / bè ngang / mu bàn chân dày (đặc trưng dáng chân Á Đông):** Bạn nên **tăng từ 0.5 đến 1 size** so với cỡ giày thông thường để ngón chân không bị ép chặt. Đặc biệt, bạn nên ưu tiên các dòng giày phom rộng (Wide / 2E / 4E) của **Asics** (dòng Novablast, Nimbus), **Mizuno** hoặc **New Balance** để các ngón chân cử động thoải mái nhất.\n3. **Đặc quyền tại One:** 100% đơn hàng được **mở hộp xỏ thử trực tiếp tại chỗ trước khi thanh toán COD**, và hỗ trợ **đổi cỡ giày miễn phí 7 ngày** nếu bạn mang không vừa chân ạ!',
+      chips: ['Xem giày Asics cho chân bè', 'Xem giày New Balance', 'Bảng quy đổi size', 'Hotline 1900 8888'],
+    };
+  }
+
+  // 11.5. TƯ VẤN THỂ HÌNH CAO LỚN ("tôi cao m98 thì mua đôi nào", "cao 1m90")
+  const isTallHeight =
+    /(cao\s*1?m[89]\d|cao\s*m98|cao\s*1m98|m98|chiều cao)/i.test(q) &&
+    !/(đặt|chốt|tôi lấy đôi)/i.test(q);
+
+  if (isTallHeight) {
+    return {
+      type: 'policy_sizeguide',
+      answer: 'Dạ với chiều cao lý tưởng và vóc dáng cao lớn, bạn thường sẽ có kích thước bàn chân dài (khoảng size 43, 44, 45) cùng trọng lượng cơ thể tương ứng khi tiếp đất. One - Store xin tư vấn kinh nghiệm chọn giày tối ưu cho bạn:\n\n1. **Chọn đệm giày dày và đàn hồi cao:** Nên ưu tiên các dòng giày có bộ đệm dày dặn, hỗ trợ hấp thụ chấn động và bảo vệ khớp gối tối đa như **Nike Invincible 3** (đệm ZoomX dày), **Adidas Ultraboost Light**, hoặc **Asics Novablast 4 Trampoline**.\n2. **Chọn cỡ giày:** Khi mua giày chạy bộ hoặc sneaker hàng ngày, bạn nên chọn dư mũi từ **1 đến 1.5 cm** để ngón chân cử động thoải mái nhất.\n3. **Đặc quyền tại One:** Bạn hoàn toàn được **xỏ thử giày trực tiếp vào chân tại nhà trước khi thanh toán COD**, nếu đi chật hoặc rộng sẽ được đổi size miễn phí 7 ngày ạ!',
+      chips: ['Xem Nike Invincible 3', 'Xem Asics Novablast 4', 'Bảng quy đổi size', 'Tư vấn chọn size'],
     };
   }
 
@@ -1108,6 +1175,29 @@ export interface ChatResponseEmitter {
   orderCreated: (createdOrder: any) => Promise<void>;
   chips?: (chipList: string[]) => Promise<void>;
   done: () => Promise<void>;
+}
+
+export function mapToProductCard(p: ProductRecord) {
+  let sizesArr: string[] = [];
+  let colorsArr: string[] = [];
+  try { sizesArr = typeof p.sizes === 'string' ? JSON.parse(p.sizes) : (p.sizes as any) || []; } catch { sizesArr = []; }
+  try { colorsArr = typeof p.colors === 'string' ? JSON.parse(p.colors) : (p.colors as any) || []; } catch { colorsArr = []; }
+  return {
+    id: p.id || 0,
+    name: p.name,
+    slug: p.slug || '',
+    category: p.category,
+    description: p.description,
+    price: p.price,
+    compare_at_price: p.compare_at_price || null,
+    stock: p.stock,
+    sizes: sizesArr,
+    colors: colorsArr,
+    image_key: p.image_key || null,
+    featured: p.featured || 0,
+    created_at: p.created_at || '',
+    image_url: p.image_key ? '/api/images/' + encodeURIComponent(p.image_key) : null,
+  };
 }
 
 /**
@@ -1607,7 +1697,7 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
   // 0. TẦNG ĐỆM CACHE: CLOUDFLARE KV (env.CACHE) (< 30ms)
   const qClean = question.trim();
   const qHash = await hashQuery(qClean);
-  const cacheKey = `chat_cache_v6:${qHash}`;
+  const cacheKey = `chat_cache_v7:${qHash}`;
   if (c.env.CACHE && (!history || history.length === 0)) {
     try {
       const cached = (await c.env.CACHE.get(cacheKey, 'json')) as {
@@ -1633,6 +1723,111 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
     await emitter.status('Đang tra cứu tri thức và kho giày D1...');
   }
 
+  const questionLower = question.toLowerCase();
+
+  // === ĐIỀU HƯỚNG ĐẶC BIỆT 1: GIÀY ĐẮT NHẤT / GIÁ CAO NHẤT / VIP NHẤT (< 80ms) ===
+  const isHighestPrice =
+    /(?:đôi|giày|mẫu)?\s*(?:nào\s+)?(?:đắt nhất|mắc nhất|cao cấp nhất|giá cao nhất|vip nhất)/i.test(questionLower) ||
+    /(?:tìm|xem|cho tôi|gợi ý)?\s*(?:đôi|giày|mẫu)\s*(?:đắt nhất|mắc nhất|cao cấp nhất|giá cao nhất|vip nhất)/i.test(questionLower);
+
+  if (isHighestPrice) {
+    const highestRes = await c.env.DB.prepare(
+      'SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE stock > 0 ORDER BY price DESC LIMIT 3',
+    ).all();
+    const highestProducts = (highestRes.results || []) as ProductRecord[];
+    const topNames = highestProducts.map((p) => `**${p.name}** (${p.price.toLocaleString('vi-VN')} VND)`).join(', ');
+
+    const highAnswer = `Dạ tại One - Store, các mẫu giày chạy bộ cao cấp và đắt giá nhất hiện có trong kho là: ${topNames}.\n\nĐây là các siêu phẩm giày thi đấu marathon đỉnh cao thế giới với công nghệ đĩa đệm Carbon trợ lực bứt tốc tối đa. Toàn bộ sản phẩm đều là hàng phân phối chính hãng 100%, bảo hành 6 tháng chính hãng, miễn phí vận chuyển toàn quốc và được quyền **đồng kiểm, xỏ thử tại chỗ 100%** trước khi thanh toán COD ạ!`;
+
+    const suggested = highestProducts.map(mapToProductCard);
+    await emitter.delta(highAnswer);
+    await emitter.products(suggested);
+    await emitter.chips?.(['Xem 70 mẫu sneaker', 'Chính sách bảo hành', 'Chính sách freeship', 'Tư vấn chọn size']);
+    await emitter.done();
+
+    if (c.env.CACHE) {
+      await c.env.CACHE.put(
+        cacheKey,
+        JSON.stringify({
+          answer: highAnswer,
+          products: suggested,
+          sources: ['Kho giày chính hãng D1'],
+          chips: ['Xem 70 mẫu sneaker', 'Chính sách bảo hành', 'Chính sách freeship', 'Tư vấn chọn size'],
+        }),
+        { expirationTtl: 14400 },
+      ).catch(() => {});
+    }
+    return;
+  }
+
+  // === ĐIỀU HƯỚNG ĐẶC BIỆT 2: GIÀY RẺ NHẤT / GIÁ THẤP NHẤT / TIẾT KIỆM NHẤT (< 80ms) ===
+  const isLowestPrice =
+    /(?:đôi|giày|mẫu)?\s*(?:nào\s+)?(?:rẻ nhất|giá thấp nhất|giá rẻ nhất|bình dân nhất|tiết kiệm nhất)/i.test(questionLower) ||
+    /(?:tìm|xem|cho tôi|gợi ý)?\s*(?:đôi|giày|mẫu)\s*(?:rẻ nhất|giá thấp nhất|giá rẻ nhất|bình dân nhất|tiết kiệm nhất)/i.test(questionLower);
+
+  if (isLowestPrice) {
+    const lowestRes = await c.env.DB.prepare(
+      'SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE stock > 0 ORDER BY price ASC LIMIT 2',
+    ).all();
+    const lowestProducts = (lowestRes.results || []) as ProductRecord[];
+    const lowNames = lowestProducts.map((p) => `**${p.name}** (${p.price.toLocaleString('vi-VN')} VND)`).join(' và ');
+
+    const lowAnswer = `Dạ tại One - Store, 2 mẫu sneaker chính hãng có mức giá ưu đãi và tiết kiệm nhất trong kho hiện tại là ${lowNames}.\n\nCả hai đều là dòng sneaker thời trang trẻ trung, phom dáng êm ái, bảo hành chính hãng 12 tháng, áp dụng mã ưu đãi **ONE10** giảm ngay 10% và chính sách **đồng kiểm, xỏ thử tại chỗ 100%** trước khi thanh toán COD ạ!`;
+
+    const suggested = lowestProducts.map(mapToProductCard);
+    await emitter.delta(lowAnswer);
+    await emitter.products(suggested);
+    await emitter.chips?.(['Xem 70 mẫu sneaker', 'Mã giảm giá ONE10', 'Tư vấn chọn size', 'Chính sách freeship']);
+    await emitter.done();
+
+    if (c.env.CACHE) {
+      await c.env.CACHE.put(
+        cacheKey,
+        JSON.stringify({
+          answer: lowAnswer,
+          products: suggested,
+          sources: ['Kho giày chính hãng D1'],
+          chips: ['Xem 70 mẫu sneaker', 'Mã giảm giá ONE10', 'Tư vấn chọn size', 'Chính sách freeship'],
+        }),
+        { expirationTtl: 14400 },
+      ).catch(() => {});
+    }
+    return;
+  }
+
+  // === ĐIỀU HƯỚNG ĐẶC BIỆT 3: GIÀY ĐI MƯA / CHỐNG NƯỚC GORE-TEX / ĐỊA HÌNH TRAIL (< 80ms) ===
+  const isRainShoe = /(trời mưa|đi mưa|chạy trời mưa|mưa gió|chống nước|chống trơn|đường ướt|gore-tex|trơn trượt)/i.test(questionLower);
+
+  if (isRainShoe) {
+    const rainRes = await c.env.DB.prepare(
+      "SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE stock > 0 AND (name LIKE '%GORE-TEX%' OR name LIKE '%Trail%' OR name LIKE '%Speedcross%' OR category = 'Outdoor') ORDER BY price DESC LIMIT 3",
+    ).all();
+    const rainProducts = (rainRes.results || []) as ProductRecord[];
+    const rainNames = rainProducts.map((p) => `- **${p.name}**: **${p.price.toLocaleString('vi-VN')} VND** (${p.category})`).join('\n');
+
+    const rainAnswer = `Dạ chào bạn! Để đi hoặc chạy bộ trong điều kiện trời mưa, đường ướt trơn trượt, One - Store khuyên bạn nên chọn các dòng giày trang bị màng chống thấm nước **GORE-TEX** hoặc dòng giày địa hình **Trail** có đế gai chống trơn trượt cực tốt.\n\nDưới đây là các mẫu giày đi mưa chuyên dụng chính hãng đang có sẵn tại One:\n\n${rainNames}\n\nToàn bộ các mẫu trên đều có khả năng kháng nước và chống trượt vượt trội, bảo hành chính hãng 12 tháng và được **xỏ thử trực tiếp tại nhà** trước khi thanh toán COD ạ!`;
+
+    const suggested = rainProducts.map(mapToProductCard);
+    await emitter.delta(rainAnswer);
+    await emitter.products(suggested);
+    await emitter.chips?.(['Xem giày GORE-TEX', 'Tư vấn chọn size', 'Chính sách freeship', 'Chính sách đổi size']);
+    await emitter.done();
+
+    if (c.env.CACHE) {
+      await c.env.CACHE.put(
+        cacheKey,
+        JSON.stringify({
+          answer: rainAnswer,
+          products: suggested,
+          sources: ['Kho giày chính hãng D1'],
+          chips: ['Xem giày GORE-TEX', 'Tư vấn chọn size', 'Chính sách freeship', 'Chính sách đổi size'],
+        }),
+        { expirationTtl: 14400 },
+      ).catch(() => {});
+    }
+    return;
+  }
+
   // 1. Trích xuất thuộc tính lọc từ câu hỏi
   const filters = extractProductFilters(question, history);
   const whereClauses: string[] = ['stock > 0'];
@@ -1653,6 +1848,11 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
     bindParams.push(filters.category);
   }
 
+  if (filters.minPrice) {
+    whereClauses.push('price >= ?');
+    bindParams.push(filters.minPrice);
+  }
+
   if (filters.maxPrice) {
     whereClauses.push('price <= ?');
     bindParams.push(filters.maxPrice);
@@ -1665,12 +1865,49 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
     bindParams.push('%' + cLower + '%', '%' + cUpper + '%');
   }
 
-  const hasSpecificFilter = Boolean(filters.brand || filters.modelKeyword || filters.category || filters.maxPrice || filters.color);
+  const hasSpecificFilter = Boolean(filters.brand || filters.modelKeyword || filters.category || filters.minPrice || filters.maxPrice || filters.color);
   const sqlQuery = 'SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE ' + whereClauses.join(' AND ') + ' ORDER BY featured DESC, id ASC LIMIT 20';
 
   const productStmt = c.env.DB.prepare(sqlQuery);
   const productRes = await (bindParams.length > 0 ? productStmt.bind(...bindParams) : productStmt).all();
   const matchedProducts = (productRes.results || []) as ProductRecord[];
+
+  // === ĐIỀU HƯỚNG ĐẶC BIỆT 4: NGÂN SÁCH VƯỢT TRẦN HOẶC NGÂN SÁCH LỚN (> 6.290.000 VND hoặc 30 triệu) (< 80ms) ===
+  const isBigBudget =
+    Boolean(filters.minPrice && filters.minPrice > 6290000) ||
+    Boolean(filters.maxPrice && filters.maxPrice > 6290000 && matchedProducts.length === 0) ||
+    /(?:có|ngân sách|tài chính|tầm|khoảng|giá)?\s*(\d{2,3})\s*(?:triệu|tr)\b/i.test(questionLower);
+
+  if (isBigBudget) {
+    const highestRes = await c.env.DB.prepare(
+      'SELECT id, name, slug, category, description, price, compare_at_price, stock, sizes, colors, image_key, featured, created_at FROM products WHERE stock > 0 ORDER BY price DESC LIMIT 3',
+    ).all();
+    const highestProducts = (highestRes.results || []) as ProductRecord[];
+    const maxPriceStr = highestProducts.length > 0 ? highestProducts[0].price.toLocaleString('vi-VN') + ' VND' : '6.290.000 VND';
+    const topNames = highestProducts.map((p) => `**${p.name}** (${p.price.toLocaleString('vi-VN')} VND)`).join(', ');
+
+    const budgetAnswer = `Dạ tại One - Store, toàn bộ sản phẩm đều là sneaker và giày chạy bộ phân phối chính hãng 100% với mức giá niêm yết cao nhất hiện tại là **${maxPriceStr}** (mẫu ${topNames}). Cửa hàng hiện chưa có mẫu giày đơn lẻ nào vượt quá mức giá này ạ.\n\nVới mức ngân sách dồi dào của bạn, bạn hoàn toàn có thể lựa chọn sở hữu combo từ 2 đến 5 đôi sneaker hiệu năng cao hàng đầu thế giới phục vụ đa dạng nhu cầu (chạy bộ marathon, tập gym và dạo phố thời trang). One xin gợi ý bạn các siêu phẩm cao cấp nhất tại kho để bạn tham khảo:`;
+
+    const suggested = highestProducts.map(mapToProductCard);
+    await emitter.delta(budgetAnswer);
+    await emitter.products(suggested);
+    await emitter.chips?.(['Xem 70 mẫu sneaker', 'Chính sách bảo hành', 'Chính sách freeship', 'Tư vấn chọn size']);
+    await emitter.done();
+
+    if (c.env.CACHE) {
+      await c.env.CACHE.put(
+        cacheKey,
+        JSON.stringify({
+          answer: budgetAnswer,
+          products: suggested,
+          sources: ['Kho giày chính hãng D1'],
+          chips: ['Xem 70 mẫu sneaker', 'Chính sách bảo hành', 'Chính sách freeship', 'Tư vấn chọn size'],
+        }),
+        { expirationTtl: 14400 },
+      ).catch(() => {});
+    }
+    return;
+  }
 
   // === MŨI NHỌN 0: XỬ LÝ TRƯỜNG HỢP NGÂN SÁCH DƯỚI GIÁ SÀN KHO D1 (< 80ms) ===
   // Khách hỏi mua giày với mức giá thấp hơn mẫu rẻ nhất hiện có (ví dụ: dưới 1 triệu, dưới 1.5 triệu)
@@ -1684,28 +1921,7 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
 
     const outOfBudgetMsg = `Dạ hiện tại tại One - Store, toàn bộ 70 mẫu giày thể thao & sneaker đều là hàng phân phối chính hãng 100% nhập khẩu từ các thương hiệu hàng đầu thế giới (Nike, Adidas, Asics, Mizuno, Puma, New Balance, Anta...), nên mức giá khởi điểm tốt nhất hiện tại là từ **${lowestPriceStr}** (mẫu ${lowestNames}). Cửa hàng hiện chưa có mẫu giày chính hãng nào dưới ${filters.maxPrice.toLocaleString('vi-VN')} VND ạ.\n\nOne xin gợi ý bạn 2 mẫu sneaker chính hãng có mức giá ưu đãi và tốt nhất tại kho hiện tại:`;
 
-    const budgetSuggested = lowestProducts.map((p) => {
-      let sizesArr: string[] = [];
-      let colorsArr: string[] = [];
-      try { sizesArr = typeof p.sizes === 'string' ? JSON.parse(p.sizes) : p.sizes; } catch { sizesArr = []; }
-      try { colorsArr = typeof p.colors === 'string' ? JSON.parse(p.colors) : p.colors; } catch { colorsArr = []; }
-      return {
-        id: p.id || 0,
-        name: p.name,
-        slug: p.slug || '',
-        category: p.category,
-        description: p.description,
-        price: p.price,
-        compare_at_price: p.compare_at_price || null,
-        stock: p.stock,
-        sizes: sizesArr,
-        colors: colorsArr,
-        image_key: p.image_key || null,
-        featured: p.featured || 0,
-        created_at: p.created_at || '',
-        image_url: p.image_key ? '/api/images/' + encodeURIComponent(p.image_key) : null,
-      };
-    });
+    const budgetSuggested = lowestProducts.map(mapToProductCard);
 
     await emitter.delta(outOfBudgetMsg);
     await emitter.products(budgetSuggested);
@@ -1852,7 +2068,6 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
   // Kiểm tra điểm tương đồng vector cao nhất từ Vectorize
   const maxVectorScore = contextChunks.reduce((max, ch) => Math.max(max, ch.score || 0), 0);
   const brandKeywords = ['nike', 'adidas', 'asics', 'mizuno', 'new balance', 'salomon', 'puma', 'on running', 'hoka', 'li-ning', 'anta', 'jordan'];
-  const questionLower = question.toLowerCase();
   const mentionsBrand = brandKeywords.some((b) => questionLower.includes(b));
   const mentionsShoeDomain = /(giày|sneaker|chạy bộ|marathon|bóng rổ|dã ngoại|đế|cỡ|size|xỏ thử|đồng kiểm|đổi size|freeship|bảo hành|mã giảm|đặt hàng|mua|đơn hàng)/i.test(questionLower);
 
@@ -1923,12 +2138,18 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
 
   let aiResponseText = '';
 
+  const FALLBACK_RESPONSES = [
+    'Dạ One - Store xin phép lắng nghe thêm thông tin từ bạn ạ. Bạn có thể chia sẻ cụ thể hơn về nhu cầu sử dụng (chạy bộ marathon, tập gym hay dạo phố thời trang) hoặc khoảng giá mong muốn để One tư vấn mẫu giày chuẩn nhất nhé!',
+    'Dạ câu hỏi của bạn rất thú vị! Để One - Store chọn đúng đôi giày ưng ý nhất cho bạn từ kho 70 mẫu sneaker chính hãng Âu - Á, bạn đang quan tâm đến thương hiệu nào (Nike, Adidas, Asics...) hoặc cần đo size chân chuẩn dáng không ạ?',
+    'Dạ One - Store luôn sẵn sàng đồng hành cùng bạn. Bạn có thể cho One biết thêm về cỡ giày thường đi, dáng chân (chân bè hay thon) hoặc mức ngân sách dự kiến để One lọc ngay đôi giày êm ái nhất gửi bạn nhé!',
+  ];
+
   // 4. GỌI MÔ HÌNH LLM (STREAMING HOẶC NON-STREAMING - TỐC ĐỘ CAO <= 3S)
   if (isStream) {
     try {
-      const aiResult = (await c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
+      const aiResult = (await c.env.AI.run('@cf/meta/llama-3-8b-instruct', {
         messages: conversationMessages,
-        max_tokens: 500,
+        max_tokens: 450,
         temperature: 0.1,
         stream: true,
       })) as any;
@@ -1967,13 +2188,13 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
         await emitter.delta(content);
       }
     } catch (err: any) {
-      console.error('[Workers AI Gemma Stream Error]', err?.message || err);
+      console.error('[Workers AI Llama Stream Error]', err?.message || err);
     }
   } else {
     try {
-      const aiResult = (await c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
+      const aiResult = (await c.env.AI.run('@cf/meta/llama-3-8b-instruct', {
         messages: conversationMessages,
-        max_tokens: 500,
+        max_tokens: 450,
         temperature: 0.1,
       })) as any;
 
@@ -1994,14 +2215,16 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
 
     aiResponseText = cleanModelOutput(aiResponseText);
     if (!aiResponseText) {
-      aiResponseText = 'Dạ chào bạn, One - Store hiện phân phối độc quyền và chính hãng các dòng giày thể thao từ 10 thương hiệu hàng đầu Âu - Á (Nike, Adidas, Asics, Mizuno, New Balance, Salomon, Puma, On Running, Hoka One One, Li-Ning, Anta). Bạn đang quan tâm đến mẫu giày cụ thể nào hay cần One tư vấn chọn size giày chuẩn theo dáng chân nhé!';
+      const fallback = FALLBACK_RESPONSES[Math.floor(Math.random() * FALLBACK_RESPONSES.length)];
+      aiResponseText = fallback;
     }
     await emitter.delta(aiResponseText);
   }
 
   // Fallback an toàn nếu chuỗi stream rỗng
   if (!aiResponseText.trim()) {
-    const fallback = 'Dạ chào bạn, One - Store hiện phân phối độc quyền và chính hãng các dòng giày thể thao từ 10 thương hiệu hàng đầu Âu - Á (Nike, Adidas, Asics, Mizuno, New Balance, Salomon, Puma, On Running, Hoka One One, Li-Ning, Anta). Bạn đang quan tâm đến mẫu giày cụ thể nào hay cần One tư vấn chọn size giày chuẩn theo dáng chân nhé!';
+    const fallback = FALLBACK_RESPONSES[Math.floor(Math.random() * FALLBACK_RESPONSES.length)];
+    aiResponseText = fallback;
     await emitter.delta(fallback);
   }
 
@@ -2021,28 +2244,7 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
     matchedSuggested = matchedProducts.slice(0, 3);
   }
 
-  const suggestedProducts = matchedSuggested.slice(0, 4).map((p) => {
-    let sizesArr: string[] = [];
-    let colorsArr: string[] = [];
-    try { sizesArr = typeof p.sizes === 'string' ? JSON.parse(p.sizes) : p.sizes; } catch { sizesArr = []; }
-    try { colorsArr = typeof p.colors === 'string' ? JSON.parse(p.colors) : p.colors; } catch { colorsArr = []; }
-    return {
-      id: p.id || 0,
-      name: p.name,
-      slug: p.slug || '',
-      category: p.category,
-      description: p.description,
-      price: p.price,
-      compare_at_price: p.compare_at_price || null,
-      stock: p.stock,
-      sizes: sizesArr,
-      colors: colorsArr,
-      image_key: p.image_key || null,
-      featured: p.featured || 0,
-      created_at: p.created_at || '',
-      image_url: p.image_key ? '/api/images/' + encodeURIComponent(p.image_key) : null,
-    };
-  });
+  const suggestedProducts = matchedSuggested.slice(0, 4).map(mapToProductCard);
 
   await emitter.products(suggestedProducts);
   await emitter.sources(sources);
@@ -2050,7 +2252,7 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
   await emitter.done();
 
   // 6. LƯU KẾT QUẢ VÀO CLOUDFLARE KV CACHE (< 30ms cho các lần truy vấn tiếp theo, trừ trường hợp fallback)
-  const isFallbackText = aiResponseText.includes('phân phối độc quyền và chính hãng các dòng giày thể thao từ 10 thương hiệu');
+  const isFallbackText = FALLBACK_RESPONSES.some((f) => aiResponseText.includes(f.slice(0, 30)));
   if (c.env.CACHE && (!history || history.length === 0) && aiResponseText && !isFallbackText) {
     try {
       await c.env.CACHE.put(
@@ -2356,6 +2558,6 @@ chatbot.get('/chat/status', (c) => {
     embedding_model: '@cf/baai/bge-m3',
     vector_dimensions: 1024,
     vector_index: 'ba-khi-knowledge',
-    llm_model: '@cf/google/gemma-4-26b-a4b-it',
+    llm_model: '@cf/meta/llama-3-8b-instruct',
   });
 });
