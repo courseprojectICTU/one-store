@@ -125,7 +125,7 @@ visitorsRouter.post('/visit', async (c) => {
   const isoTime = new Date(ingestTs).toISOString();
   const { browser, os } = parseClientMeta(ua);
   const visitUuid = crypto.randomUUID();
-  const siteId = c.env.BASIN_SITE_ID || 'nhom02';
+  const siteId = c.env.BASIN_SITE_ID || 'CHIEUTHU4-NHOM02';
 
   const metaObj = {
     visit_id: visitUuid,
@@ -307,6 +307,8 @@ async function pushToBasinStream(
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       console.warn('[Basin Stream Push Failed]', res.status, errText);
+    } else {
+      console.log('[Basin Stream Push OK]', res.status, payload.id, payload.country, payload.device);
     }
   } catch (err) {
     console.warn('[Basin Stream Push Error]', err);

@@ -1585,25 +1585,25 @@ one-store/
   - `npx tsx scripts/test_voice_vad.ts`: **19/19 ĐẠT**.
   - `npm run deploy`: Biên dịch 7/7 trang tĩnh, deploy thành công lên `https://one-store.onestoresportsshoes.workers.dev` (Version ID: `3fa8a91c-bfcd-4a15-a4d6-fccb1b9eade9`).
 
-### ADR-63: Hệ Thống Thống Kê Lượt Ghé Thăm 24h Dual-Sink (Cloudflare D1 `visitor_logs` + Basin Catalog HTTP Stream `nhom02`)
+### ADR-63: Hệ Thống Thống Kê Lượt Ghé Thăm 24h Dual-Sink (Cloudflare D1 `visitor_logs` + Basin Catalog HTTP Stream `CHIEUTHU4-NHOM02`)
 - **Thời gian thực hiện:** 2026-11-11.
 - **Bối cảnh & Kiến trúc:**
-  - Theo yêu cầu thống kê lượt truy cập, quốc gia và loại thiết bị trong 24 giờ qua và đẩy dữ liệu về Basin Catalog Stream Endpoint (`https://f8fb6f6f730b404fb2f273fd789d04df.ingest.cloudflare.com`, định danh `id = "nhom02"`, `time` theo `millisecond`, `ip` thật và `device` phân nhóm `ios` / `android` / `windows` / `macos`).
+  - Theo yêu cầu thống kê lượt truy cập, quốc gia và loại thiết bị trong 24 giờ qua và đẩy dữ liệu về Basin Catalog Stream Endpoint (`https://f8fb6f6f730b404fb2f273fd789d04df.ingest.cloudflare.com`, định danh `id = "CHIEUTHU4-NHOM02"`, `time` theo `millisecond`, `ip` thật và `device` phân nhóm `ios` / `android` / `windows` / `macos`).
 - **Các thành phần đã triển khai:**
   1. **CSDL & Cấu hình ([0017_create_visitor_logs.sql](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/backend/migrations/0017_create_visitor_logs.sql), [wrangler.toml](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/wrangler.toml), [commerce.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/backend/src/commerce.ts)):**
      - Tạo bảng `visitor_logs` (`id, _ingest_ts, country, device, time, ip, meta`) cùng 3 index trên D1 (`fashion_db`).
-     - Thêm `[vars]` `BASIN_STREAM_URL` & `BASIN_SITE_ID = "nhom02"` vào `wrangler.toml` và mở rộng `ShopBindings`.
+     - Thêm `[vars]` `BASIN_STREAM_URL` & `BASIN_SITE_ID = "CHIEUTHU4-NHOM02"` vào `wrangler.toml` và mở rộng `ShopBindings`.
   2. **Backend Dual-Sink & API 24h ([visitors.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/backend/src/visitors.ts), [index.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/backend/src/index.ts)):**
      - `POST /api/visit`: Trích xuất `country` từ Cloudflare Edge (`request.cf?.country` / `cf-ipcountry`), phân loại thiết bị theo hệ điều hành (`bot` → `ios` → `android` → `windows` → `macos` → `linux` → `other`), lấy IP thật (`cf-connecting-ip`), timestamp millisecond (`Date.now()`) và `meta` JSON (`visit_id, path, referrer, locale, screen, browser, os`).
-     - Đẩy bất đồng bộ qua `c.executionCtx.waitUntil(pushToBasinStream(...))` dưới dạng mảng JSON `[{...}]` (đã xác thực endpoint yêu cầu array `code 1002`), bỏ qua khi chạy `LOCAL`; đồng thời ghi bản sao vào D1 `visitor_logs`.
+     - Đẩy bất đồng bộ qua `c.executionCtx.waitUntil(pushToBasinStream(...))` dưới dạng mảng JSON `[{...}]` (đã xác thực endpoint yêu cầu array `code 1002`) kèm log `[Basin Stream Push OK]`, bỏ qua khi chạy `LOCAL`; đồng thời ghi bản sao vào D1 `visitor_logs`.
      - `GET /api/admin/analytics/visitors?hours=24`: Truy vấn tổng lượt truy cập, khách duy nhất (`COUNT(DISTINCT ip)`), phân bổ theo Quốc gia, Loại thiết bị, Top trang xem và nhật ký gần nhất.
   3. **Frontend Tracker & Admin 24h Panel ([VisitorTracker.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/components/VisitorTracker.tsx), [Providers.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/components/Providers.tsx), [admin/page.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/app/admin/page.tsx)):**
      - Gắn `<VisitorTracker />` gửi beacon nền khi khách mở/chuyển trang cửa hàng.
      - Thêm khối thống kê **LƯỢT GHÉ THĂM TRONG 24 GIỜ QUA (D1 VISITOR LOGS)** trong tab Tổng quan `/admin`, đồng bộ icon `<Smartphone />` cho `ios`/`android` và `<Monitor />` cho `windows`/`macos`/`linux`.
-- **Kết Quả Kiểm Thử:**
+- **Kết Quả Kiểm Thử & Triển Khai:**
   - `npm run typecheck` & `npx tsc --noEmit --project frontend/tsconfig.json`: **0 lỗi**.
   - `npx tsx scripts/test_visitors.ts`: **17/17 ĐẠT**.
-  - `npm run build:frontend`: Xuất bản thành công 7/7 trang tĩnh ra `frontend/out/`.
+  - `npm run deploy`: Xuất bản thành công 7/7 trang tĩnh, deploy lên `https://one-store.onestoresportsshoes.workers.dev` (Version ID: `b98d8853-02d5-4e94-a505-bcb5fe975c43`).
 
 ---
 
@@ -1627,9 +1627,9 @@ one-store/
 | `frontend/src/locales/vi/modals.ts` & `en/modals.ts` | Modified | Bổ sung các nhãn song ngữ cho trạng thái thu âm, dao động và tự ngắt 2s trong chatbot. |
 | `scripts/test_voice_vad.ts` | Created | Bộ kiểm thử tự động 19 tiêu chí cho thuật toán bắt dao động âm thanh & tự ngắt im lặng 2s. |
 | `backend/migrations/0017_create_visitor_logs.sql` | Created | Khởi tạo bảng `visitor_logs` và các index phục vụ thống kê 24h trên D1 `fashion_db`. |
-| `backend/src/visitors.ts` | Created | API `POST /api/visit` (Dual-Sink: Basin Stream `nhom02` + D1) và `GET /api/admin/analytics/visitors`. |
+| `backend/src/visitors.ts` | Created | API `POST /api/visit` (Dual-Sink: Basin Stream `CHIEUTHU4-NHOM02` + D1) và `GET /api/admin/analytics/visitors`. |
 | `backend/src/commerce.ts` & `index.ts` | Modified | Mở rộng `ShopBindings` (`BASIN_STREAM_URL`, `BASIN_SITE_ID`) và mount `visitorsRouter`. |
-| `wrangler.toml` | Modified | Bổ sung `[vars]` cấu hình `BASIN_STREAM_URL` và `BASIN_SITE_ID = "nhom02"`. |
+| `wrangler.toml` | Modified | Bổ sung `[vars]` cấu hình `BASIN_STREAM_URL` và `BASIN_SITE_ID = "CHIEUTHU4-NHOM02"`. |
 | `frontend/src/components/VisitorTracker.tsx` & `Providers.tsx` | Created/Modified | Component gửi beacon lượt ghé thăm không chặn UI trên các trang cửa hàng. |
 | `frontend/src/app/admin/page.tsx` | Modified | Hiển thị khối thống kê 24h theo quốc gia, thiết bị (`ios`/`android`/`windows`/`macos`) và nhật ký gần nhất. |
 | `basinCatalog/streamInfo.txt` & `restful/call_api.http` | Created | Tài liệu đặc tả schema Basin Catalog Stream và mẫu thử HTTP request. |

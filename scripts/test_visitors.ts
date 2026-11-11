@@ -86,7 +86,7 @@ async function main() {
   const providersSrc = fs.readFileSync('frontend/src/components/Providers.tsx', 'utf8');
   const adminSrc = fs.readFileSync('frontend/src/app/admin/page.tsx', 'utf8');
 
-  check('wrangler.toml khai báo BASIN_STREAM_URL và BASIN_SITE_ID = nhom02', wranglerSrc.includes('BASIN_STREAM_URL') && wranglerSrc.includes('BASIN_SITE_ID = "nhom02"'));
+  check('wrangler.toml khai báo BASIN_STREAM_URL và BASIN_SITE_ID = CHIEUTHU4-NHOM02', wranglerSrc.includes('BASIN_STREAM_URL') && wranglerSrc.includes('BASIN_SITE_ID = "CHIEUTHU4-NHOM02"'));
   check('visitors.ts đẩy mảng [payload] lên Basin Stream và ghi D1 visitor_logs bằng .bind', visitorsSrc.includes('JSON.stringify([payload])') && visitorsSrc.includes('INSERT INTO visitor_logs') && visitorsSrc.includes("return c.json({ ok: true, id: visitUuid }, 201)"));
   check('index.ts đã mount visitorsRouter', indexSrc.includes("app.route('/api', visitorsRouter)"));
   check('Providers.tsx đã gắn <VisitorTracker />', providersSrc.includes('<VisitorTracker />'));
