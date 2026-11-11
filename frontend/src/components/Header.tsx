@@ -26,6 +26,18 @@ export default function Header() {
     acceptCookieConsent,
   } = useShop();
 
+  const cleanPath = (pathname || '/').replace(/\/+$/, '') || '/';
+  const categoryLower = (selectedCategory || '').toLowerCase();
+
+  const isHomeActive = cleanPath === '/';
+  const isRunningActive = cleanPath === '/products' && categoryLower === 'running';
+  const isLifestyleActive = cleanPath === '/products' && categoryLower === 'lifestyle';
+  const isOutdoorActive = cleanPath === '/products' && categoryLower === 'outdoor';
+  const isProductsActive =
+    cleanPath === '/products' && !isRunningActive && !isLifestyleActive && !isOutdoorActive;
+  const isOrdersActive = cleanPath === '/orders';
+  const isPoliciesActive = cleanPath === '/policies';
+
   const scrollToCatalog = () => {
     const el = document.getElementById('products');
     if (el) {
@@ -34,7 +46,7 @@ export default function Header() {
   };
 
   const handleSearchFocus = () => {
-    if (pathname === '/products') {
+    if (cleanPath === '/products') {
       scrollToCatalog();
       const searchInput = document.getElementById('searchInput');
       if (searchInput) searchInput.focus();
@@ -119,27 +131,23 @@ export default function Header() {
             <Link
               href="/"
               prefetch={false}
-              style={{
-                color: pathname === '/' ? 'var(--red)' : undefined,
-                fontWeight: pathname === '/' ? 800 : undefined,
-              }}
+              className={isHomeActive ? 'active' : undefined}
+              aria-current={isHomeActive ? 'page' : undefined}
             >
               {dict.common.nav.home}
             </Link>
             <Link
               href="/products"
               prefetch={false}
+              className={isProductsActive ? 'active' : undefined}
+              aria-current={isProductsActive ? 'page' : undefined}
               onClick={(e) => {
                 setSelectedCategory('Tất cả');
-                if (pathname === '/products') {
+                if (cleanPath === '/products') {
                   e.preventDefault();
                   window.history.pushState({}, '', '/products');
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }
-              }}
-              style={{
-                color: pathname === '/products' && selectedCategory === 'Tất cả' ? 'var(--red)' : undefined,
-                fontWeight: pathname === '/products' && selectedCategory === 'Tất cả' ? 800 : undefined,
               }}
             >
               {dict.common.nav.products}
@@ -147,17 +155,15 @@ export default function Header() {
             <Link
               href="/products?category=Running#products"
               prefetch={false}
+              className={isRunningActive ? 'active' : undefined}
+              aria-current={isRunningActive ? 'page' : undefined}
               onClick={(e) => {
                 setSelectedCategory('Running');
-                if (pathname === '/products') {
+                if (cleanPath === '/products') {
                   e.preventDefault();
                   window.history.pushState({}, '', '/products?category=Running');
                   scrollToCatalog();
                 }
-              }}
-              style={{
-                color: pathname === '/products' && selectedCategory === 'Running' ? 'var(--red)' : undefined,
-                fontWeight: pathname === '/products' && selectedCategory === 'Running' ? 800 : undefined,
               }}
             >
               {dict.common.nav.running}
@@ -165,17 +171,15 @@ export default function Header() {
             <Link
               href="/products?category=Lifestyle#products"
               prefetch={false}
+              className={isLifestyleActive ? 'active' : undefined}
+              aria-current={isLifestyleActive ? 'page' : undefined}
               onClick={(e) => {
                 setSelectedCategory('Lifestyle');
-                if (pathname === '/products') {
+                if (cleanPath === '/products') {
                   e.preventDefault();
                   window.history.pushState({}, '', '/products?category=Lifestyle');
                   scrollToCatalog();
                 }
-              }}
-              style={{
-                color: pathname === '/products' && selectedCategory === 'Lifestyle' ? 'var(--red)' : undefined,
-                fontWeight: pathname === '/products' && selectedCategory === 'Lifestyle' ? 800 : undefined,
               }}
             >
               {dict.common.nav.lifestyle}
@@ -183,17 +187,15 @@ export default function Header() {
             <Link
               href="/products?category=Outdoor#products"
               prefetch={false}
+              className={isOutdoorActive ? 'active' : undefined}
+              aria-current={isOutdoorActive ? 'page' : undefined}
               onClick={(e) => {
                 setSelectedCategory('Outdoor');
-                if (pathname === '/products') {
+                if (cleanPath === '/products') {
                   e.preventDefault();
                   window.history.pushState({}, '', '/products?category=Outdoor');
                   scrollToCatalog();
                 }
-              }}
-              style={{
-                color: pathname === '/products' && selectedCategory === 'Outdoor' ? 'var(--red)' : undefined,
-                fontWeight: pathname === '/products' && selectedCategory === 'Outdoor' ? 800 : undefined,
               }}
             >
               {dict.common.nav.outdoor}
@@ -201,20 +203,16 @@ export default function Header() {
             <Link
               href="/orders"
               prefetch={false}
-              style={{
-                color: pathname === '/orders' ? 'var(--red)' : undefined,
-                fontWeight: pathname === '/orders' ? 800 : undefined,
-              }}
+              className={isOrdersActive ? 'active' : undefined}
+              aria-current={isOrdersActive ? 'page' : undefined}
             >
               {dict.common.nav.my_orders}
             </Link>
             <Link
               href="/policies"
               prefetch={false}
-              style={{
-                color: pathname === '/policies' ? 'var(--red)' : undefined,
-                fontWeight: pathname === '/policies' ? 800 : undefined,
-              }}
+              className={isPoliciesActive ? 'active' : undefined}
+              aria-current={isPoliciesActive ? 'page' : undefined}
             >
               {dict.common.nav.policies}
             </Link>

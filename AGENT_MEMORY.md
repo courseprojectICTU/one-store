@@ -1564,6 +1564,27 @@ one-store/
      - *Tình huống mới 100% Tầng 2 (Cold LLM)* (`"tôi chuẩn bị đi du lịch leo núi ở Đà Lạt cuối tuần nên mang đôi nào bám đường tốt"`): **8.474 ms** | Đồng cảm địa hình dốc trơn trượt, tư vấn chuẩn `Salomon XT-6 Black Phantom`, `Nike Pegasus Trail 4 GORE-TEX`, `Adidas Terrex Free Hiker 2 GORE-TEX` | 0% rò rỉ CoT | Zero-Emoji Đạt.
      - *Ngoài phạm vi Guardrail* (`"viết giúp tôi một đoạn code python tính dãy fibonacci"`): **136 ms** | Từ chối khéo léo và điều hướng về tư vấn size giày.
 
+### ADR-62: Nâng Cấp UI/UX Frontend Toàn Diện (Voice Micro Lớn & Tự Ngắt 2s Im Lặng, Xóa Badge 3D, Banner 3 Câu Nói Nổi Tiếng, Active Menu Đỏ Toàn Trang)
+- **Thời gian thực hiện:** 2026-11-11.
+- **Các hạng mục đã triển khai:**
+  1. **Chatbot Voice Micro Lớn & Bắt Dao Động Tự Ngắt Sau 2s Im Lặng ([voice.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/lib/voice.ts), [ChatbotWidget.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/components/ChatbotWidget.tsx), [globals.css](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/app/globals.css)):**
+     - Khắc phục lỗi CSS `.chat-form button` ép icon, nâng kích thước nút Micro lên `48×48px` (icon `<Mic size={24} />`) và nút Gửi/Dừng `46×46px`.
+     - Xây dựng [`SilenceDetector`](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/lib/voice.ts#L107) & [`computeAudioMetrics`](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/lib/voice.ts#L53) bằng Web Audio API (`AudioContext` + `AnalyserNode`, quét mỗi `50ms` với ngưỡng nhiễu nền thích ứng).
+     - Tự động ngắt thu âm sau `2000ms` im lặng: Nếu đã bắt được tiếng nói (`hasSpoken === true`) thì tự động gửi qua Whisper AI (`/api/chat/transcribe`) và đẩy câu hỏi cho chatbot; nếu im lặng hoàn toàn từ đầu thì tự hủy thu âm và nhả micro không tốn gọi API.
+     - Thêm thanh hiển thị 14 cột sóng âm dao động thời gian thực (`.voice-waveform`), đếm ngược thời gian im lặng (`.voice-silence-fill`) và tách riêng trạng thái `isTranscribing` khỏi `isSending`.
+  2. **Xóa Badge Tương Tác 3D ([Sneaker3DViewer.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/components/Sneaker3DViewer.tsx), [vi/common.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/locales/vi/common.ts), [en/common.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/locales/en/common.ts)):**
+     - Gỡ bỏ `viewer_3d.badge` (`NIKE AIR JORDAN 1 · TƯƠNG TÁC 3D`) và khối pill badge nổi trên góc trên trái khung 3D.
+  3. **Banner 3 Câu Nói Kinh Điển Trên Trang Chủ ([QuotesBanner.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/components/QuotesBanner.tsx), [page.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/app/page.tsx)):**
+     - Đặt ngay phía trên mục **Top 4 sản phẩm bán chạy nhất** (`Hero` → `Perks` → `QuotesBanner` → `BestSellers` → `Footer`).
+     - Trình bày 3 khung song ngữ Việt – Anh kèm chân dung lưu nội bộ trong `frontend/public/images/quotes/`: **Warren Buffett** (Uy tín thương hiệu), **Steve Jobs** (Trải nghiệm sản phẩm), **Jeff Bezos** (Bán hàng & Phục vụ khách hàng).
+  4. **Đồng Bộ Trạng Thái Active Đỏ Trên Thanh Menu Điều Hướng ([Header.tsx](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/components/Header.tsx), [globals.css](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/frontend/src/app/globals.css)):**
+     - Khắc phục lỗi `usePathname()` trả về đường dẫn có trailing slash (`/products/`, `/orders/`, `/policies/`) do cấu hình `trailingSlash: true` bằng chuẩn hóa `cleanPath`.
+     - Toàn bộ 7 mục menu (`TRANG CHỦ`, `SẢN PHẨM`, `CHẠY BỘ`, `THỜI TRANG`, `DÃ NGOẠI`, `LỊCH SỬ MUA HÀNG`, `CHÍNH SÁCH`) chuyển sang chữ đỏ đậm `.navlinks a.active` + `aria-current="page"` ngay khi được chọn.
+- **Kết Quả Kiểm Thử & Triển Khai Production:**
+  - `npm run typecheck` & `npx tsc --noEmit --project frontend/tsconfig.json`: **0 lỗi**.
+  - `npx tsx scripts/test_voice_vad.ts`: **19/19 ĐẠT**.
+  - `npm run deploy`: Biên dịch 7/7 trang tĩnh, deploy thành công lên `https://one-store.onestoresportsshoes.workers.dev` (Version ID: `3fa8a91c-bfcd-4a15-a4d6-fccb1b9eade9`).
+
 ---
 
 ## 3. DANH SÁCH CÁC FILE ĐÃ THAY ĐỔI
@@ -1574,6 +1595,17 @@ one-store/
 | `backend/src/chatbot.ts` | Modified | Pre-Router, Guardrails, Mũi Nhọn 1.5 Fast Budget Resolver, Tích hợp Gemma 4 26B (`enable_thinking: false`, `max_tokens: 550`), Smart Timeout Guard 16s, Output Sanitizer, KV Cache `v17`, Zero-Emoji 100%. |
 | `scripts/test_user_scenarios.ts` | Modified | Bộ kịch bản kiểm thử tự động 20 tình huống câu hỏi thực tế của khách hàng (100% Pass). |
 | `scripts/test_live_scenarios.ts` | Modified | Bộ kiểm thử trực tiếp trên Cloudflare Workers Live Production (`/api/chat`) 10/10 kịch bản thực tế (100% Pass). |
+| `frontend/src/lib/voice.ts` | Modified | Bổ sung Web Audio API `AnalyserNode`, `computeAudioMetrics`, `SilenceDetector` tự ngắt sau 2000ms im lặng. |
+| `frontend/src/components/ChatbotWidget.tsx` | Modified | Nâng cấp nút Micro lớn `48×48px` (`<Mic size={24} />`), waveform dao động 14 cột, đếm ngược im lặng 2s, tách `isTranscribing`. |
+| `frontend/src/components/Sneaker3DViewer.tsx` | Modified | Xóa badge nổi `NIKE AIR JORDAN 1 · TƯƠNG TÁC 3D` ở góc trên trái trình xem 3D. |
+| `frontend/src/components/QuotesBanner.tsx` | Created | Banner lớn 3 khung câu nói của Warren Buffett, Steve Jobs, Jeff Bezos về uy tín, trải nghiệm và bán hàng. |
+| `frontend/public/images/quotes/*` | Created | Lưu trữ nội bộ 3 ảnh chân dung (`warren-buffett.jpg`, `steve-jobs.jpg`, `jeff-bezos.jpg`). |
+| `frontend/src/app/page.tsx` | Modified | Hiển thị `<QuotesBanner />` ngay phía trên `<BestSellers />` trên trang chủ. |
+| `frontend/src/components/Header.tsx` | Modified | Chuẩn hóa `cleanPath` loại trailing slash, kích hoạt active đỏ `.navlinks a.active` cho toàn bộ 7 menu items. |
+| `frontend/src/app/globals.css` | Modified | Bổ sung style nút micro/waveform, `.quotes-banner` / `.quote-card` responsive và `.navlinks a.active`. |
+| `frontend/src/locales/vi/common.ts` & `en/common.ts` | Modified | Xóa `viewer_3d.badge`, bổ sung nội dung song ngữ `quotes_banner`. |
+| `frontend/src/locales/vi/modals.ts` & `en/modals.ts` | Modified | Bổ sung các nhãn song ngữ cho trạng thái thu âm, dao động và tự ngắt 2s trong chatbot. |
+| `scripts/test_voice_vad.ts` | Created | Bộ kiểm thử tự động 19 tiêu chí cho thuật toán bắt dao động âm thanh & tự ngắt im lặng 2s. |
 
 
 ---

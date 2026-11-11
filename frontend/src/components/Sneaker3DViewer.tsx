@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { RotateCcw, Play, Pause, RefreshCw, Move3d } from 'lucide-react';
+import { RotateCcw, Play, Pause, RefreshCw } from 'lucide-react';
 import { useShop } from '@/context/ShopContext';
 import { COLORS } from '@/constants';
 
@@ -260,40 +260,6 @@ export default function Sneaker3DViewer({
           if (e.currentTarget) e.currentTarget.style.cursor = 'grab';
         }}
       />
-
-      {/* Header Pill Badge */}
-      <div
-        style={{
-          position: 'absolute',
-          top: '16px',
-          left: '16px',
-          zIndex: 10,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          background: 'rgba(10, 10, 14, 0.88)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          border: '1px solid rgba(225, 29, 72, 0.5)',
-          borderRadius: '9999px',
-          padding: '6px 14px',
-          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
-          pointerEvents: 'none',
-        }}
-      >
-        <Move3d size={15} style={{ color: COLORS.red.primary }} />
-        <span
-          style={{
-            fontSize: '11px',
-            fontWeight: 800,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: '#ffffff',
-          }}
-        >
-          {v3d.badge}
-        </span>
-      </div>
 
       {/* Interactive Controls Bar (Bottom) */}
       <div

@@ -5,6 +5,7 @@ import Header from '@/components/Header';
 import Hero from '@/components/Hero';
 import Perks from '@/components/Perks';
 import BestSellers from '@/components/BestSellers';
+import QuotesBanner from '@/components/QuotesBanner';
 import Footer from '@/components/Footer';
 
 export default function Home() {
@@ -14,6 +15,7 @@ export default function Home() {
       <main style={{ paddingBottom: '40px' }}>
         <Hero />
         <Perks />
+        <QuotesBanner />
         <BestSellers />
       </main>
       <Footer />

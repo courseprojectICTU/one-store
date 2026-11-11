@@ -6,7 +6,14 @@ import { ChatMessage, PendingOrderInfo } from '@/types';
 import Logo from './Logo';
 import { useShop } from '@/context/ShopContext';
 import { readSSEStream } from '@/lib/sse';
-import { VoiceRecorder, transcribeAudioBlob } from '@/lib/voice';
+import {
+  VoiceRecorder,
+  transcribeAudioBlob,
+  createIdleBars,
+  DEFAULT_SILENCE_TIMEOUT_MS,
+  DEFAULT_MAX_DURATION_SEC,
+  type VoiceActivityState,
+} from '@/lib/voice';
 import {
   MessageSquare,
   X,
@@ -20,7 +27,6 @@ import {
   Check,
   ExternalLink,
   Mic,
-  MicOff,
   Square,
 } from 'lucide-react';
 
@@ -175,15 +181,71 @@ export default function ChatbotWidget() {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Trạng thái thu âm giọng nói (Whisper AI)
+  // Trạng thái thu âm giọng nói & bắt dao động (Whisper AI + VAD 2s silence cutoff)
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceFeedback, setVoiceFeedback] = useState<{ type: 'error' | 'info'; message: string } | null>(null);
+  const [voiceActivity, setVoiceActivity] = useState<VoiceActivityState>(() => ({
+    level: 0,
+    bars: createIdleBars(),
+    isSpeaking: false,
+    hasSpoken: false,
+    silenceMs: 0,
+    silenceTimeoutMs: DEFAULT_SILENCE_TIMEOUT_MS,
+  }));
   const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
+  const isStoppingVoiceRef = useRef(false);
+  const voiceFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Trạng thái streaming SSE thời gian thực và ngắt luồng
   const [statusText, setStatusText] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const showVoiceFeedback = (type: 'error' | 'info', message: string, durationMs = 4200) => {
+    if (voiceFeedbackTimerRef.current) {
+      clearTimeout(voiceFeedbackTimerRef.current);
+    }
+    setVoiceFeedback({ type, message });
+    voiceFeedbackTimerRef.current = setTimeout(() => {
+      setVoiceFeedback(null);
+      voiceFeedbackTimerRef.current = null;
+    }, durationMs);
+  };
+
+  const resetVoiceState = () => {
+    setIsRecording(false);
+    setRecordingSeconds(0);
+    setVoiceActivity({
+      level: 0,
+      bars: createIdleBars(),
+      isSpeaking: false,
+      hasSpoken: false,
+      silenceMs: 0,
+      silenceTimeoutMs: DEFAULT_SILENCE_TIMEOUT_MS,
+    });
+  };
+
+  useEffect(() => {
+    if (!isOpen && voiceRecorderRef.current) {
+      voiceRecorderRef.current.cancel();
+      voiceRecorderRef.current = null;
+      isStoppingVoiceRef.current = false;
+      resetVoiceState();
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (voiceRecorderRef.current) {
+        voiceRecorderRef.current.cancel();
+        voiceRecorderRef.current = null;
+      }
+      if (voiceFeedbackTimerRef.current) {
+        clearTimeout(voiceFeedbackTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleCopyCode = (code: string) => {
     try {
@@ -231,51 +293,113 @@ export default function ChatbotWidget() {
     setStatusText(null);
   };
 
-  const handleVoiceToggle = async () => {
-    if (isRecording) {
-      if (!voiceRecorderRef.current) return;
-      try {
-        setIsSending(true);
-        setStatusText(locale === 'vi' ? 'Đang chuyển đổi giọng nói qua Whisper AI...' : 'Transcribing voice via Whisper AI...');
-        const blob = await voiceRecorderRef.current.stop();
-        setIsRecording(false);
-        setRecordingSeconds(0);
-        const transcribed = await transcribeAudioBlob(blob);
+  const handleSendRef = useRef<(questionText?: string) => Promise<void>>(async () => {});
+
+  const finishVoiceRecording = async (
+    recorder: VoiceRecorder,
+    options: { hasSpoken: boolean; autoStopped: boolean },
+  ) => {
+    if (isStoppingVoiceRef.current || voiceRecorderRef.current !== recorder) return;
+    isStoppingVoiceRef.current = true;
+    voiceRecorderRef.current = null;
+    resetVoiceState();
+
+    // Nếu tự ngắt sau 2s mà không ghi nhận dao động giọng nói nào, ngắt ngay không gọi Whisper
+    if (options.autoStopped && !options.hasSpoken) {
+      recorder.cancel();
+      isStoppingVoiceRef.current = false;
+      showVoiceFeedback('info', cb.voice_no_speech, 4000);
+      return;
+    }
+
+    try {
+      setIsTranscribing(true);
+      setStatusText(cb.voice_transcribing);
+      const blob = await recorder.stop();
+
+      if (!blob || blob.size < 1500) {
         setStatusText(null);
-        setIsSending(false);
-        if (transcribed && transcribed.trim().length >= 2) {
-          setInputQuestion(transcribed.trim());
-          handleSend(transcribed.trim());
-        }
-      } catch (err: any) {
-        setIsRecording(false);
-        setRecordingSeconds(0);
-        setStatusText(null);
-        setIsSending(false);
-        setVoiceError(err?.message || 'Không thể nhận dạng âm thanh');
-        setTimeout(() => setVoiceError(null), 4500);
-      }
-    } else {
-      if (!VoiceRecorder.isSupported()) {
-        setVoiceError(locale === 'vi' ? 'Trình duyệt không hỗ trợ micro' : 'Browser does not support microphone');
-        setTimeout(() => setVoiceError(null), 3000);
+        setIsTranscribing(false);
+        showVoiceFeedback('info', cb.voice_empty_transcript, 4000);
         return;
       }
-      setVoiceError(null);
-      const recorder = new VoiceRecorder();
-      recorder.onTick = (sec) => setRecordingSeconds(sec);
-      recorder.onMaxDurationReached = () => {
-        handleVoiceToggle();
-      };
-      voiceRecorderRef.current = recorder;
 
-      try {
-        await recorder.start();
-        setIsRecording(true);
-      } catch (err: any) {
-        setVoiceError(err?.message || 'Lỗi bật micro');
-        setTimeout(() => setVoiceError(null), 4000);
+      const transcribed = await transcribeAudioBlob(blob);
+      setStatusText(null);
+      setIsTranscribing(false);
+
+      if (transcribed && transcribed.trim().length >= 2) {
+        const cleanTranscript = transcribed.trim();
+        setInputQuestion(cleanTranscript);
+        await handleSendRef.current(cleanTranscript);
+      } else {
+        showVoiceFeedback('info', cb.voice_empty_transcript, 4000);
       }
+    } catch (err: unknown) {
+      setStatusText(null);
+      setIsTranscribing(false);
+      const errMsg = err instanceof Error ? err.message : cb.voice_error_generic;
+      showVoiceFeedback('error', errMsg || cb.voice_error_generic, 4500);
+    } finally {
+      isStoppingVoiceRef.current = false;
+    }
+  };
+
+  const handleCancelVoice = () => {
+    const recorder = voiceRecorderRef.current;
+    if (!recorder) return;
+    voiceRecorderRef.current = null;
+    isStoppingVoiceRef.current = false;
+    recorder.cancel();
+    resetVoiceState();
+  };
+
+  const handleVoiceToggle = async () => {
+    if (isRecording && voiceRecorderRef.current) {
+      await finishVoiceRecording(voiceRecorderRef.current, {
+        hasSpoken: voiceRecorderRef.current.getHasSpoken(),
+        autoStopped: false,
+      });
+      return;
+    }
+
+    if (isSending || isTranscribing) return;
+
+    if (!VoiceRecorder.isSupported()) {
+      showVoiceFeedback('error', cb.voice_unsupported, 3500);
+      return;
+    }
+
+    setVoiceFeedback(null);
+    isStoppingVoiceRef.current = false;
+
+    const recorder = new VoiceRecorder({
+      maxDuration: DEFAULT_MAX_DURATION_SEC,
+      silenceTimeoutMs: DEFAULT_SILENCE_TIMEOUT_MS,
+    });
+
+    recorder.onTick = (sec) => setRecordingSeconds(sec);
+    recorder.onAudioActivity = (state) => setVoiceActivity(state);
+    recorder.onSilenceAutoStop = ({ hasSpoken }) => {
+      void finishVoiceRecording(recorder, { hasSpoken, autoStopped: true });
+    };
+    recorder.onMaxDurationReached = () => {
+      void finishVoiceRecording(recorder, {
+        hasSpoken: recorder.getHasSpoken(),
+        autoStopped: true,
+      });
+    };
+
+    voiceRecorderRef.current = recorder;
+
+    try {
+      await recorder.start();
+      setIsRecording(true);
+    } catch (err: unknown) {
+      voiceRecorderRef.current = null;
+      resetVoiceState();
+      const errMsg = err instanceof Error ? err.message : cb.voice_error_generic;
+      showVoiceFeedback('error', errMsg || cb.voice_error_generic, 4200);
     }
   };
 
@@ -490,6 +614,8 @@ export default function ChatbotWidget() {
       abortControllerRef.current = null;
     }
   };
+
+  handleSendRef.current = handleSend;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1224,23 +1350,33 @@ export default function ChatbotWidget() {
           </div>
         )}
 
-        {/* Thanh trạng thái xử lý streaming hoặc lỗi giọng nói */}
-        {(statusText || voiceError) && (
+        {/* Thanh trạng thái xử lý streaming hoặc thông báo giọng nói */}
+        {(statusText || voiceFeedback) && (
           <div
             style={{
-              padding: '6px 14px',
-              background: voiceError ? '#fef2f2' : '#f8fafc',
+              padding: '7px 14px',
+              background:
+                voiceFeedback?.type === 'error'
+                  ? '#fef2f2'
+                  : voiceFeedback?.type === 'info'
+                    ? '#f8fafc'
+                    : '#f8fafc',
               borderTop: '1px solid #e2e8f0',
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
               fontSize: '11.5px',
-              color: voiceError ? '#b91c1c' : '#e11d48',
+              color:
+                voiceFeedback?.type === 'error'
+                  ? '#b91c1c'
+                  : voiceFeedback?.type === 'info'
+                    ? '#334155'
+                    : '#e11d48',
               fontWeight: 600,
             }}
           >
-            {voiceError ? (
-              <span>{voiceError}</span>
+            {voiceFeedback ? (
+              <span>{voiceFeedback.message}</span>
             ) : (
               <>
                 <Sparkles size={12} className="animate-spin" />
@@ -1250,48 +1386,137 @@ export default function ChatbotWidget() {
           </div>
         )}
 
-        {/* Thanh thu âm giọng nói trực tiếp (Voice Recording Bar) */}
+        {/* Thanh thu âm giọng nói trực tiếp & bắt dao động sóng âm (tự ngắt sau 2s im lặng) */}
         {isRecording && (
-          <div
-            style={{
-              padding: '8px 14px',
-              background: '#fef2f2',
-              borderTop: '1.5px solid #f87171',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span
-                style={{
-                  width: '10px',
-                  height: '10px',
-                  borderRadius: '50%',
-                  background: '#ef4444',
-                  boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.2)',
-                }}
-              />
-              <span style={{ fontSize: '12px', fontWeight: 700, color: '#b91c1c' }}>
-                Đang lắng nghe... ({recordingSeconds}s / 15s)
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={handleVoiceToggle}
+          <div className="voice-recording-bar">
+            <div
               style={{
-                background: '#ef4444',
-                color: '#ffffff',
-                border: 0,
-                borderRadius: '6px',
-                padding: '4px 10px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
               }}
             >
-              Hoàn tất
-            </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                <span
+                  style={{
+                    width: '9px',
+                    height: '9px',
+                    borderRadius: '50%',
+                    flexShrink: 0,
+                    background: voiceActivity.isSpeaking ? '#e11d48' : '#ef4444',
+                    boxShadow: voiceActivity.isSpeaking
+                      ? '0 0 0 4px rgba(225, 29, 72, 0.28)'
+                      : '0 0 0 2px rgba(239, 68, 68, 0.16)',
+                    transition: 'box-shadow 0.12s ease',
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: '#be123c',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {voiceActivity.isSpeaking
+                    ? cb.voice_speaking
+                    : voiceActivity.silenceMs >= 400
+                      ? cb.voice_silence_countdown(
+                          Math.max(0, (voiceActivity.silenceTimeoutMs - voiceActivity.silenceMs) / 1000).toFixed(1),
+                        )
+                      : cb.voice_listening}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: '#64748b',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {recordingSeconds}s / {DEFAULT_MAX_DURATION_SEC}s
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCancelVoice}
+                  aria-label={cb.voice_cancel}
+                  title={cb.voice_cancel}
+                  style={{
+                    background: '#ffffff',
+                    color: '#475569',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '6px',
+                    padding: '4px 8px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                  }}
+                >
+                  <X size={12} aria-hidden="true" />
+                  <span>{cb.voice_cancel}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleVoiceToggle}
+                  style={{
+                    background: '#e11d48',
+                    color: '#ffffff',
+                    border: 0,
+                    borderRadius: '6px',
+                    padding: '4px 9px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                  }}
+                >
+                  <Check size={12} aria-hidden="true" />
+                  <span>{cb.voice_finish}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Thanh hiển thị biên độ dao động giọng nói thời gian thực */}
+            <div className="voice-waveform" aria-hidden="true">
+              {voiceActivity.bars.map((val, idx) => (
+                <span
+                  key={idx}
+                  className="voice-wave-bar"
+                  style={{
+                    height: `${Math.max(4, Math.round(val * 22))}px`,
+                    backgroundColor: voiceActivity.isSpeaking ? '#e11d48' : '#fda4af',
+                  }}
+                />
+              ))}
+            </div>
+
+            {/* Thanh tiến trình đếm ngược 2s im lặng tự ngắt */}
+            <div className="voice-silence-track" aria-hidden="true">
+              <div
+                className="voice-silence-fill"
+                style={{
+                  width: `${
+                    voiceActivity.isSpeaking
+                      ? 0
+                      : Math.min(
+                          100,
+                          Math.round((voiceActivity.silenceMs / voiceActivity.silenceTimeoutMs) * 100),
+                        )
+                  }%`,
+                }}
+              />
+            </div>
           </div>
         )}
 
@@ -1309,29 +1534,25 @@ export default function ChatbotWidget() {
             alignItems: 'center',
           }}
         >
-          {/* Nút bật/tắt Micro thu âm Whisper */}
+          {/* Nút bật/tắt Micro thu âm Whisper (kích thước lớn, bắt dao động thời gian thực) */}
           <button
             type="button"
+            className={`chat-icon-btn chat-mic-btn ${isRecording ? 'recording' : ''}`}
             onClick={handleVoiceToggle}
-            disabled={isSending && !isRecording}
-            title={isRecording ? 'Dừng ghi âm' : 'Nói để tìm kiếm (Whisper AI)'}
-            aria-label="Microphone"
+            disabled={(isSending || isTranscribing) && !isRecording}
+            title={isRecording ? cb.voice_stop_title : cb.voice_mic_title}
+            aria-label={isRecording ? cb.voice_stop_title : cb.voice_mic_title}
             style={{
-              border: '1px solid ' + (isRecording ? '#ef4444' : '#cbd5e1'),
-              background: isRecording ? '#fee2e2' : '#f8fafc',
-              color: isRecording ? '#ef4444' : '#64748b',
-              borderRadius: '8px',
-              width: '38px',
-              height: '38px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: isSending && !isRecording ? 'not-allowed' : 'pointer',
-              flexShrink: 0,
-              transition: 'all 0.15s ease',
+              transform: isRecording ? `scale(${(1 + voiceActivity.level * 0.08).toFixed(3)})` : undefined,
+              boxShadow: isRecording
+                ? `0 0 0 ${4 + Math.round(voiceActivity.level * 9)}px rgba(225, 29, 72, ${(
+                    0.18 +
+                    voiceActivity.level * 0.24
+                  ).toFixed(2)})`
+                : undefined,
             }}
           >
-            {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
+            <Mic size={24} strokeWidth={2.2} aria-hidden="true" />
           </button>
 
           <input
@@ -1339,17 +1560,18 @@ export default function ChatbotWidget() {
             autoComplete="off"
             id="chatQuestion"
             maxLength={600}
-            placeholder={isRecording ? 'Đang thu âm qua micro...' : cb.input_placeholder}
+            placeholder={isRecording ? cb.voice_input_placeholder : cb.input_placeholder}
             required
             value={inputQuestion}
             onChange={(e) => setInputQuestion(e.target.value)}
-            disabled={isSending || isRecording}
+            disabled={isSending || isTranscribing || isRecording}
             style={{
               flex: 1,
+              height: '46px',
               border: '1px solid #cbd5e1',
-              borderRadius: '8px',
-              padding: '10px 14px',
-              fontSize: '13px',
+              borderRadius: '12px',
+              padding: '0 14px',
+              fontSize: '13.5px',
               outline: 'none',
               color: '#0f172a',
             }}
@@ -1359,48 +1581,31 @@ export default function ChatbotWidget() {
           {isSending ? (
             <button
               type="button"
+              className="chat-icon-btn chat-send-btn"
               onClick={handleStopGeneration}
               title="Dừng phản hồi"
               aria-label="Dừng phản hồi"
               style={{
-                border: 0,
                 background: '#475569',
                 color: '#ffffff',
-                borderRadius: '8px',
-                width: '38px',
-                height: '38px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                transition: 'background 0.2s',
               }}
             >
-              <Square size={14} fill="#ffffff" />
+              <Square size={16} fill="#ffffff" aria-hidden="true" />
             </button>
           ) : (
             <button
               aria-label={cb.send_label}
               title={cb.send_label}
               type="submit"
-              disabled={isSending || !inputQuestion.trim() || isRecording}
+              className="chat-icon-btn chat-send-btn"
+              disabled={isSending || isTranscribing || !inputQuestion.trim() || isRecording}
               style={{
-                border: 0,
-                background: inputQuestion.trim() && !isSending ? '#e11d48' : '#94a3b8',
+                background: inputQuestion.trim() && !isSending && !isTranscribing ? '#e11d48' : '#94a3b8',
                 color: '#ffffff',
-                borderRadius: '8px',
-                width: '38px',
-                height: '38px',
-                cursor: inputQuestion.trim() && !isSending ? 'pointer' : 'not-allowed',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                transition: 'background 0.2s',
+                cursor: inputQuestion.trim() && !isSending && !isTranscribing ? 'pointer' : 'not-allowed',
               }}
             >
-              <Send size={15} />
+              <Send size={18} aria-hidden="true" />
             </button>
           )}
         </form>

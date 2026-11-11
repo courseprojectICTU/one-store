@@ -50,6 +50,40 @@ export const commonVi = {
     subtitle: 'Những mẫu giày thể thao và sneaker biểu tượng được cộng đồng săn đón nhiều nhất tại One - Store.',
     rank_prefix: 'TOP #',
   },
+  quotes_banner: {
+    eyebrow: 'TRIẾT LÝ KINH DOANH · UY TÍN & TRẢI NGHIỆM',
+    title: 'Giá trị tạo nên niềm tin bền vững',
+    subtitle: 'Những tư tưởng kinh điển về chữ tín, trải nghiệm sản phẩm và nghệ thuật bán hàng mà One - Store luôn lấy làm kim chỉ nam.',
+    items: [
+      {
+        id: 'reputation',
+        topic: 'UY TÍN THƯƠNG HIỆU',
+        quote: 'Mất 20 năm để xây dựng uy tín, nhưng chỉ cần 5 phút để đánh mất nó. Nếu nghĩ về điều đó, bạn sẽ làm mọi thứ khác đi.',
+        author: 'Warren Buffett',
+        role: 'Chủ tịch Berkshire Hathaway',
+        image: '/images/quotes/warren-buffett.jpg',
+        imageAlt: 'Chân dung Warren Buffett',
+      },
+      {
+        id: 'experience',
+        topic: 'TRẢI NGHIỆM SẢN PHẨM',
+        quote: 'Bạn phải bắt đầu từ trải nghiệm của khách hàng rồi mới đi ngược lại tìm công nghệ, chứ không thể tạo sản phẩm trước rồi mới tìm cách bán nó.',
+        author: 'Steve Jobs',
+        role: 'Nhà đồng sáng lập Apple',
+        image: '/images/quotes/steve-jobs.jpg',
+        imageAlt: 'Chân dung Steve Jobs',
+      },
+      {
+        id: 'sales',
+        topic: 'BÁN HÀNG & PHỤC VỤ',
+        quote: 'Chúng tôi xem khách hàng như những vị khách được mời đến bữa tiệc, và mình là chủ nhà. Nhiệm vụ mỗi ngày là làm từng chi tiết trải nghiệm tốt hơn một chút.',
+        author: 'Jeff Bezos',
+        role: 'Nhà sáng lập Amazon',
+        image: '/images/quotes/jeff-bezos.jpg',
+        imageAlt: 'Chân dung Jeff Bezos',
+      },
+    ],
+  },
   footer: {
     tagline: 'Tinh gọn hơn. Bản lĩnh hơn. Hệ thống phân phối giày thể thao và sneaker chính hãng Âu – Á.',
     explore_title: 'KHÁM PHÁ',
@@ -87,7 +121,6 @@ export const commonVi = {
     declined_bar_action: 'ĐỒNG Ý CHO PHÉP SỬ DỤNG COOKIE',
   },
   viewer_3d: {
-    badge: 'NIKE AIR JORDAN 1 · TƯƠNG TÁC 3D',
     toggle_autorotate_aria: 'Bật/Tắt tự động xoay',
     toggle_autorotate_title: 'Bật/Tắt tự động xoay',
     stop_rotate: 'Dừng xoay',

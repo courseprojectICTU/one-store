@@ -50,6 +50,40 @@ export const commonEn = {
     subtitle: 'Iconic performance sneakers and footwear most coveted by the community at One - Store.',
     rank_prefix: 'TOP #',
   },
+  quotes_banner: {
+    eyebrow: 'BUSINESS PHILOSOPHY · TRUST & EXPERIENCE',
+    title: 'Principles that build lasting trust',
+    subtitle: 'Timeless perspectives on integrity, product experience, and customer-first selling that guide One - Store every day.',
+    items: [
+      {
+        id: 'reputation',
+        topic: 'BRAND INTEGRITY',
+        quote: 'It takes 20 years to build a reputation and five minutes to ruin it. If you think about that, you will do things differently.',
+        author: 'Warren Buffett',
+        role: 'Chairman, Berkshire Hathaway',
+        image: '/images/quotes/warren-buffett.jpg',
+        imageAlt: 'Portrait of Warren Buffett',
+      },
+      {
+        id: 'experience',
+        topic: 'PRODUCT EXPERIENCE',
+        quote: 'You have got to start with the customer experience and work backwards to the technology — not start with the technology and try to sell it.',
+        author: 'Steve Jobs',
+        role: 'Co-founder, Apple',
+        image: '/images/quotes/steve-jobs.jpg',
+        imageAlt: 'Portrait of Steve Jobs',
+      },
+      {
+        id: 'sales',
+        topic: 'SELLING & HOSPITALITY',
+        quote: 'We see our customers as invited guests to a party, and we are the hosts. It is our job every day to make every important aspect of the customer experience a little bit better.',
+        author: 'Jeff Bezos',
+        role: 'Founder, Amazon',
+        image: '/images/quotes/jeff-bezos.jpg',
+        imageAlt: 'Portrait of Jeff Bezos',
+      },
+    ],
+  },
   footer: {
     tagline: 'Less noise. More you. Authentic European and Asian athletic footwear retailer.',
     explore_title: 'EXPLORE',
@@ -87,7 +121,6 @@ export const commonEn = {
     declined_bar_action: 'AGREE TO ALLOW COOKIE USAGE',
   },
   viewer_3d: {
-    badge: 'NIKE AIR JORDAN 1 · 3D INTERACTIVE',
     toggle_autorotate_aria: 'Toggle auto-rotate',
     toggle_autorotate_title: 'Toggle auto-rotate',
     stop_rotate: 'Pause rotation',
