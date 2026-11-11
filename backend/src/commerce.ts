@@ -15,6 +15,9 @@ export type ShopBindings = {
     query(values: number[], options: { topK: number }): Promise<{ matches: Array<{ id: string; score: number }> }>;
     deleteByIds(ids: string[]): Promise<unknown>;
   };
+
+  BASIN_STREAM_URL?: string;
+  BASIN_SITE_ID?: string;
 };
 export const commerce = new Hono<{ Bindings: ShopBindings }>();
 const error = (_c: any, message: string, status = 400) =>

@@ -29,6 +29,10 @@ import {
   Clock,
   ShieldCheck,
   ExternalLink,
+  Globe,
+  Monitor,
+  Smartphone,
+  Activity,
 } from 'lucide-react';
 import { api, money, formatDateTime } from '@/lib/api';
 import { Product, Order, KnowledgeDoc, Voucher } from '@/types';
@@ -45,6 +49,27 @@ type CustomerAnalytics = {
   first_order_at: string;
   last_order_at: string;
   segment: 'VIP' | 'POTENTIAL' | 'NEW';
+};
+
+type VisitorAnalyticsData = {
+  hours: number;
+  summary: {
+    total_visits: number;
+    unique_visitors: number;
+    human_visits: number;
+    bot_visits: number;
+  };
+  countries: Array<{ country: string; visits: number; unique_visitors: number }>;
+  devices: Array<{ device: string; visits: number; unique_visitors: number }>;
+  top_pages: Array<{ path: string; visits: number }>;
+  recent: Array<{
+    id: string;
+    _ingest_ts: number;
+    country: string;
+    device: string;
+    time: string;
+    meta: string | null;
+  }>;
 };
 
 const BRANDS = [
@@ -90,6 +115,7 @@ export default function AdminPortalPage() {
   const [customers, setCustomers] = useState<CustomerAnalytics[]>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDoc[]>([]);
+  const [visitorAnalytics, setVisitorAnalytics] = useState<VisitorAnalyticsData | null>(null);
   const [loadingData, setLoadingData] = useState<boolean>(false);
 
   // === ORDERS TAB FILTERS & MODAL ===
@@ -177,7 +203,7 @@ export default function AdminPortalPage() {
     setLoadingData(true);
     try {
       const headers = getHeaders();
-      const [overRes, chartRes, topRes, ordRes, prodRes, custRes, vouchRes, knowRes] =
+      const [overRes, chartRes, topRes, ordRes, prodRes, custRes, vouchRes, knowRes, visRes] =
         await Promise.allSettled([
           api('/api/admin/analytics/overview', { headers }),
           api('/api/admin/analytics/revenue-chart', { headers }),
@@ -187,6 +213,7 @@ export default function AdminPortalPage() {
           api('/api/admin/customers/analytics', { headers }),
           api('/api/admin/vouchers', { headers }),
           api('/api/admin/knowledge', { headers }),
+          api('/api/admin/analytics/visitors?hours=24', { headers }),
         ]);
 
       if (overRes.status === 'fulfilled' && overRes.value.overview) {
@@ -212,6 +239,9 @@ export default function AdminPortalPage() {
       }
       if (knowRes.status === 'fulfilled' && Array.isArray(knowRes.value.documents)) {
         setKnowledgeDocs(knowRes.value.documents);
+      }
+      if (visRes.status === 'fulfilled' && visRes.value?.summary) {
+        setVisitorAnalytics(visRes.value);
       }
     } catch (err: any) {
       showToast(err.message || 'Không thể tải toàn bộ dữ liệu quản trị');
@@ -1254,6 +1284,170 @@ export default function AdminPortalPage() {
                               <td style={{ fontWeight: 700, color: '#047857' }}>{money(tp.total_revenue)}</td>
                             </tr>
                           ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Thống Kê Lượt Truy Cập 24h (visitor_logs D1) */}
+                <div className="admin-card" style={{ marginTop: '24px' }}>
+                  <div className="admin-card-header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Activity size={16} style={{ color: '#e11d48' }} />
+                      <h3 className="admin-card-title">LƯỢT GHÉ THĂM TRONG 24 GIỜ QUA (D1 VISITOR LOGS)</h3>
+                    </div>
+                    <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#475569' }}>
+                      <span>
+                        Tổng lượt truy cập:{' '}
+                        <strong style={{ color: '#0f172a' }}>
+                          {visitorAnalytics?.summary.total_visits ?? 0}
+                        </strong>
+                      </span>
+                      <span>
+                        Khách duy nhất:{' '}
+                        <strong style={{ color: '#047857' }}>
+                          {visitorAnalytics?.summary.unique_visitors ?? 0}
+                        </strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+                    {/* Theo Quốc gia */}
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px', fontSize: '12px', fontWeight: 800, color: '#0f172a' }}>
+                        <Globe size={14} style={{ color: '#e11d48' }} />
+                        <span>QUỐC GIA TRUY CẬP (24H)</span>
+                      </div>
+                      {!visitorAnalytics || visitorAnalytics.countries.length === 0 ? (
+                        <div style={{ fontSize: '12px', color: '#64748b' }}>
+                          Chưa có dữ liệu truy cập trong 24 giờ qua.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          {visitorAnalytics.countries.map((cItem) => {
+                            const total = visitorAnalytics.summary.total_visits || 1;
+                            const pct = Math.round((cItem.visits / total) * 100);
+                            return (
+                              <div key={cItem.country}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                                  <span style={{ fontWeight: 700, color: '#1e293b' }}>{cItem.country}</span>
+                                  <span>
+                                    <strong>{cItem.visits}</strong> lượt ({cItem.unique_visitors} IP · {pct}%)
+                                  </span>
+                                </div>
+                                <div style={{ height: '6px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
+                                  <div style={{ width: `${pct}%`, height: '100%', background: '#0f172a' }} />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Theo Loại Thiết Bị */}
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px', fontSize: '12px', fontWeight: 800, color: '#0f172a' }}>
+                        <Monitor size={14} style={{ color: '#e11d48' }} />
+                        <span>LOẠI THIẾT BỊ (24H)</span>
+                      </div>
+                      {!visitorAnalytics || visitorAnalytics.devices.length === 0 ? (
+                        <div style={{ fontSize: '12px', color: '#64748b' }}>
+                          Chưa có dữ liệu thiết bị trong 24 giờ qua.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          {visitorAnalytics.devices.map((dItem) => {
+                            const total = visitorAnalytics.summary.total_visits || 1;
+                            const pct = Math.round((dItem.visits / total) * 100);
+                            const labelMap: Record<string, string> = {
+                              ios: 'Apple iOS (iPhone/iPad)',
+                              android: 'Android',
+                              windows: 'Windows PC',
+                              macos: 'Apple macOS',
+                              linux: 'Linux',
+                              bot: 'Bot / Trình thu thập',
+                              other: 'Thiết bị khác',
+                            };
+                            return (
+                              <div key={dItem.device}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', marginBottom: '4px' }}>
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 700, color: '#1e293b' }}>
+                                    {dItem.device === 'ios' || dItem.device === 'android' ? (
+                                      <Smartphone size={13} />
+                                    ) : dItem.device === 'bot' ? (
+                                      <Activity size={13} />
+                                    ) : (
+                                      <Monitor size={13} />
+                                    )}
+                                    <span>{labelMap[dItem.device] || dItem.device}</span>
+                                  </span>
+                                  <span>
+                                    <strong>{dItem.visits}</strong> lượt ({pct}%)
+                                  </span>
+                                </div>
+                                <div style={{ height: '6px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
+                                  <div
+                                    style={{
+                                      width: `${pct}%`,
+                                      height: '100%',
+                                      background: dItem.device === 'bot' ? '#94a3b8' : '#e11d48',
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Nhật ký ghé thăm gần nhất */}
+                  <div className="admin-table-wrap">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Thời gian</th>
+                          <th>Quốc gia</th>
+                          <th>Thiết bị</th>
+                          <th>Trang xem</th>
+                          <th>Trình duyệt / Hệ điều hành</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!visitorAnalytics || visitorAnalytics.recent.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} style={{ textAlign: 'center', color: '#64748b', padding: '18px' }}>
+                              Chưa có nhật ký ghé thăm trong 24 giờ gần nhất
+                            </td>
+                          </tr>
+                        ) : (
+                          visitorAnalytics.recent.slice(0, 8).map((v) => {
+                            let parsedMeta: { path?: string; browser?: string; os?: string } = {};
+                            try {
+                              if (v.meta) parsedMeta = JSON.parse(v.meta);
+                            } catch { }
+                            return (
+                              <tr key={v.id}>
+                                <td style={{ fontSize: '12px', color: '#475569' }}>
+                                  {formatDateTime(v.time)}
+                                </td>
+                                <td style={{ fontWeight: 700 }}>{v.country}</td>
+                                <td style={{ textTransform: 'uppercase', fontSize: '11px', fontWeight: 700 }}>
+                                  {v.device}
+                                </td>
+                                <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                                  {parsedMeta.path || '/'}
+                                </td>
+                                <td style={{ fontSize: '12px', color: '#475569' }}>
+                                  {(parsedMeta.browser || 'Other') + ' / ' + (parsedMeta.os || 'Other')}
+                                </td>
+                              </tr>
+                            );
+                          })
                         )}
                       </tbody>
                     </table>

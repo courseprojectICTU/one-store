@@ -2,6 +2,7 @@ import { commerce, type ShopBindings } from './commerce';
 
 import { adminRouter, getAdminUser, requireWritePermission } from './admin';
 import { chatbot } from './chatbot';
+import { visitorsRouter } from './visitors';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { z } from 'zod';
@@ -402,6 +403,7 @@ app.route('/api', commerce);
 
 app.route('/api', adminRouter);
 app.route('/api', chatbot);
+app.route('/api', visitorsRouter);
 app.onError((e, c) => {
   console.error(e);
   return c.json({ error: 'Lỗi máy chủ' }, 500);

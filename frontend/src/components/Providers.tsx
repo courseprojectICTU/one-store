@@ -11,6 +11,7 @@ import WishlistModal from '@/components/WishlistModal';
 import StickyMobileBar from '@/components/StickyMobileBar';
 import ChatbotWidget from '@/components/ChatbotWidget';
 import Toast from '@/components/Toast';
+import VisitorTracker from '@/components/VisitorTracker';
 
 function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -32,6 +33,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <CookieConsentBanner />
       <Toast />
       <ChatbotWidget />
+      <VisitorTracker />
     </>
   );
 }
