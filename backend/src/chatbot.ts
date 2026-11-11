@@ -1839,7 +1839,7 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
   // 0. TẦNG ĐỆM CACHE: CLOUDFLARE KV (env.CACHE) (< 30ms)
   const qClean = question.trim();
   const qHash = await hashQuery(qClean);
-  const cacheKey = `chat_cache_v15:${qHash}`;
+  const cacheKey = `chat_cache_v17:${qHash}`;
   if (c.env.CACHE && (!history || history.length === 0)) {
     try {
       const cached = (await c.env.CACHE.get(cacheKey, 'json')) as {
@@ -2384,6 +2384,68 @@ Bạn vui lòng kiểm tra lại thông tin trên. Nếu mọi thứ đã chính
     return;
   }
 
+  // === MŨI NHỌN 1.5: FAST BUDGET & ATTRIBUTE RESOLVER (< 80ms, 0 Token LLM) ===
+  // Xử lý các câu hỏi tìm kiếm theo khoảng giá hoặc ngân sách cụ thể khi đã tìm thấy sản phẩm chính xác trong D1
+  const isBudgetQuery = Boolean(filters.minPrice || filters.maxPrice) && matchedProducts.length > 0;
+  const isAbstractStyleQuery = isFormalOrEvent || isDressOutfit || /(gu |phong cách|hợp với|phối đồ|outfit|thời trang|dạo phố|nữ tính|sang trọng|đau khớp|đứng lâu)/i.test(questionLower);
+
+  if (isBudgetQuery && !isAbstractStyleQuery) {
+    const minP = filters.minPrice;
+    const maxP = filters.maxPrice;
+    let intro = '';
+
+    if (minP && maxP) {
+      const minStr = (minP >= 1000000 ? `${minP / 1000000}` : `${minP.toLocaleString('vi-VN')}`) + ' triệu';
+      const maxStr = (maxP >= 1000000 ? `${maxP / 1000000}` : `${maxP.toLocaleString('vi-VN')}`) + ' triệu';
+      if (minP >= 4000000) {
+        intro = `Dạ chào bạn! One hiểu rằng với ngân sách từ ${minStr} đến ${maxStr}, bạn đang tìm kiếm những dòng sản phẩm cao cấp, vừa tối ưu hiệu năng thể thao vượt trội vừa thể hiện phong cách đẳng cấp riêng.`;
+      } else if (minP >= 2000000) {
+        intro = `Dạ chào bạn! Với mức ngân sách lý tưởng từ ${minStr} đến ${maxStr}, One - Store có rất nhiều mẫu sneaker và giày chạy bộ chính hãng cực kỳ chất lượng, cân bằng hoàn hảo giữa độ êm ái và tính thẩm mỹ.`;
+      } else {
+        intro = `Dạ chào bạn! Với mức ngân sách từ ${minStr} đến ${maxStr}, One - Store xin gợi ý những mẫu sneaker chính hãng có mức giá tốt nhất tại kho, đảm bảo chất lượng bền đẹp và êm chân tối đa.`;
+      }
+    } else if (maxP) {
+      const maxStr = (maxP >= 1000000 ? `${maxP / 1000000}` : `${maxP.toLocaleString('vi-VN')}`) + ' triệu';
+      intro = `Dạ chào bạn! Với mức ngân sách tối đa ${maxStr}, One - Store xin gửi bạn những mẫu giày chính hãng tối ưu nhất trong tầm giá đang có sẵn tại kho:`;
+    } else if (minP) {
+      const minStr = (minP >= 1000000 ? `${minP / 1000000}` : `${minP.toLocaleString('vi-VN')}`) + ' triệu';
+      intro = `Dạ chào bạn! Ở phân khúc cao cấp từ ${minStr} trở lên, One - Store sở hữu những siêu phẩm sneaker và giày chạy bộ hiệu năng hàng đầu với công nghệ đệm tối tân nhất:`;
+    } else {
+      intro = `Dạ chào bạn! One - Store xin gửi bạn các mẫu giày chính hãng phù hợp nhất với tiêu chí ngân sách của bạn đang có sẵn tại kho:`;
+    }
+
+    const topMatches = matchedProducts.slice(0, 3);
+    const productItems = topMatches.map((p) => {
+      const firstSentence = p.description ? p.description.split('.')[0].trim() : '';
+      const highlight = firstSentence.length > 10 ? ` — ${firstSentence}.` : '.';
+      return `• **${p.name}**: ${p.price.toLocaleString('vi-VN')} VND (${p.category})${highlight}`;
+    }).join('\n');
+
+    const policyFooter = `\n\nToàn bộ sản phẩm tại One đều là hàng phân phối chính hãng 100%, được áp dụng mã giảm giá **ONE10** giảm 10%, quyền **mở hộp xỏ thử trực tiếp tại nhà** trước khi thanh toán COD và hỗ trợ đổi size miễn phí trong 7 ngày nếu mang chưa vừa chân ạ!`;
+
+    const fastFilterAnswer = `${intro}\n\n${productItems}${policyFooter}`;
+    const budgetSuggested = topMatches.map(mapToProductCard);
+
+    await emitter.delta(fastFilterAnswer);
+    await emitter.products(budgetSuggested);
+    await emitter.chips?.(['Tư vấn chọn size', 'Mã giảm giá ONE10', 'Chính sách freeship', 'Xem thêm mẫu']);
+    await emitter.done();
+
+    if (c.env.CACHE) {
+      await c.env.CACHE.put(
+        cacheKey,
+        JSON.stringify({
+          answer: fastFilterAnswer,
+          products: budgetSuggested,
+          sources: ['Kho giày chính hãng D1'],
+          chips: ['Tư vấn chọn size', 'Mã giảm giá ONE10', 'Chính sách freeship', 'Xem thêm mẫu'],
+        }),
+        { expirationTtl: 14400 },
+      ).catch(() => {});
+    }
+    return;
+  }
+
   const catalogContext = matchedProducts.slice(0, 4).map((p) => {
     let sizesStr = p.sizes;
     let colorsStr = p.colors;
@@ -2457,6 +2519,7 @@ TÂM THẾ & PHONG CÁCH TƯ VẤN (BẮT BUỘC):
 3. VĂN PHONG TỰ NHIÊN, ẤM ÁP, THÂN THIỆN: Trò chuyện như một chuyên viên tư vấn giày cao cấp thực thụ, xưng "One" hoặc "Em" và gọi "bạn" hoặc "quý khách". Tuyệt đối không dùng văn mẫu rập khuôn, không lặp lại nguyên văn các câu chào máy móc.
 4. ĐỘ DÀI LÝ TƯỞNG: Khoảng 2-3 đoạn văn ngắn gọn, súc tích (100 - 160 từ), mạch lạc, dễ đọc.
 5. ZERO-EMOJI 100%: TUYỆT ĐỐI KHÔNG SỬ DỤNG BẤT KỲ BIỂU TƯỢNG CẢM XÚC (EMOJI) NÀO trong toàn bộ câu trả lời.
+6. PHẢN HỒI TRỰC TIẾP SIÊU TỐC: BẮT ĐẦU CÂU TRẢ LỜI NGAY LẬP TỨC bằng tiếng Việt. Tuyệt đối không suy nghĩ nháp (Chain of Thought), không viết bản nháp bằng tiếng Anh, không nhẩm checklist tự kiểm tra.
 
 QUY TẮC DỮ LIỆU CHÍNH HÃNG (CLOSED-DOMAIN STRICT GROUNDING):
 1. BẠN LÀ MỘT TRỢ LÝ ĐÓNG BĂNG PHẠM VI (CLOSED-DOMAIN AI). BẠN TUYỆT ĐỐI CHỈ ĐƯỢC PHÉP SỬ DỤNG DUY NHẤT 2 NGUỒN DỮ LIỆU ĐƯỢC CẤP TRONG CONTEXT: [DANH MỤC GIÀY SẴN CÓ TRONG KHO D1] VÀ [TRÍCH ĐOẠN TRI THỨC CHÍNH SÁCH].
@@ -2507,10 +2570,11 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
     try {
       const aiResult = (await c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
         messages: conversationMessages,
-        max_tokens: 2500,
+        max_tokens: 550,
         temperature: 0.4,
+        chat_template_kwargs: { enable_thinking: false },
         stream: true,
-      })) as any;
+      } as any)) as any;
 
       if (aiResult instanceof ReadableStream) {
         const reader = aiResult.getReader();
@@ -2549,12 +2613,33 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
       console.error('[Workers AI Llama Stream Error]', err?.message || err);
     }
   } else {
+    const buildContextualFallback = () => {
+      if (matchedProducts.length > 0) {
+        const items = matchedProducts
+          .slice(0, 3)
+          .map((p) => {
+            const firstSent = p.description ? p.description.split('.')[0].trim() : '';
+            return `• **${p.name}** (${p.price.toLocaleString('vi-VN')} VND - ${p.category})${firstSent ? ': ' + firstSent + '.' : ''}`;
+          })
+          .join('\n');
+        return `Dạ chào bạn, One - Store hiểu mong muốn của bạn và xin gợi ý các mẫu giày chính hãng phù hợp nhất đang có sẵn tại kho:\n\n${items}\n\nToàn bộ sản phẩm đều được hỗ trợ mở hộp xỏ thử tận nơi trước khi thanh toán COD và miễn phí đổi size 7 ngày ạ!`;
+      }
+      return FALLBACK_RESPONSES[0];
+    };
+
     try {
-      const aiResult = (await c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
+      const aiPromise = c.env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
         messages: conversationMessages,
-        max_tokens: 2500,
+        max_tokens: 550,
         temperature: 0.4,
-      })) as any;
+        chat_template_kwargs: { enable_thinking: false },
+      } as any);
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('LLM_TIMEOUT_16S')), 16000),
+      );
+
+      const aiResult = (await Promise.race([aiPromise, timeoutPromise])) as any;
 
       const message = aiResult?.choices?.[0]?.message;
       const content = (message?.content || aiResult?.response || aiResult?.text || '').trim();
@@ -2564,13 +2649,13 @@ ${knowledgeContext || 'Không tìm thấy tài liệu liên quan.'}`;
         aiResponseText = content;
       } else if (reasoning) {
         const extracted = extractAnswerFromReasoning(reasoning);
-        aiResponseText = extracted || reasoning;
+        aiResponseText = extracted || buildContextualFallback();
       } else {
-        aiResponseText = FALLBACK_RESPONSES[0];
+        aiResponseText = buildContextualFallback();
       }
     } catch (err: any) {
-      console.error('[Workers AI Error]', err?.message || err);
-      aiResponseText = FALLBACK_RESPONSES[0];
+      console.error('[Workers AI Timeout/Error Fallback]', err?.message || err);
+      aiResponseText = buildContextualFallback();
     }
 
     aiResponseText = cleanModelOutput(aiResponseText);

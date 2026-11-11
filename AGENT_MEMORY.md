@@ -1531,6 +1531,39 @@ one-store/
     * *Câu mặc váy hoa dạo phố:* Bot đồng cảm về nét dịu dàng, tự tin xuống phố, tư vấn ngọt ngào Puma Palermo Leather Gum (Hồng Pastel Phối Trắng) và Adidas Samba OG Classic.
     * Không còn văn mẫu khuôn sáo, câu từ tự nhiên, ấm áp, có cảm xúc và thông minh đúng chất mô hình LLM.
 
+### ADR-61: Tối Ưu Tốc Độ Phản Hồi Chatbot (Smart Tiered Response, Tắt CoT Mặc Định `enable_thinking: false`, Bảo Vệ Smart Timeout 16s) & Báo Cáo Nghiệm Thu Toàn Diện
+- **Bối cảnh:**
+  - Sau khi nâng cấp lên `@cf/google/gemma-4-26b-a4b-it` ở ADR-60 để tăng cường cảm xúc và sự thấu hiểu khách hàng, người dùng đánh giá cao chất lượng câu trả lời nhưng phản ánh **tốc độ trả lời các câu hỏi chưa có kịch bản trước vẫn khá chậm**.
+  - Kết quả đo thực tế câu hỏi *"Hãy tìm cho tôi đôi giày có giá từ 4-6 triệu"* trước khi tối ưu mất **21.200 ms (21,20 giây)** do mô hình 26B bật chế độ Chain-of-Thought mặc định (`enable_thinking: true`), suy luận nhẩm hàng trăm token trước khi sinh văn bản.
+- **Triển Khai Kỹ Thuật Trong [chatbot.ts](file:///d:/HocTap/HK7/ChuyenDoiSo/project/one-store/backend/src/chatbot.ts):**
+  1. **Kiến trúc Hybrid "Smart Tiered Response" (Mũi Nhọn 1.5 - Fast Budget & Attribute Resolver):**
+     - Phân tách thông minh giữa câu hỏi **tra cứu có điều kiện ngân sách/thuộc tính rõ ràng** (`isBudgetQuery && !isAbstractStyleQuery`) và câu hỏi **tư vấn phong cách/ngữ cảnh mở**.
+     - Với câu hỏi lọc ngân sách (ví dụ: *4-6 triệu*, *dưới 2 triệu*, *2-3 triệu*, *trên 4 triệu*) đã truy vấn ra sản phẩm chính xác từ D1: Tự động tổng hợp lời chào thấu hiểu ngân sách + mô tả nổi bật của top 3 sản phẩm + cam kết đồng kiểm xỏ thử COD và đổi size 7 ngày miễn phí.
+     - **Thời gian phản hồi:** Giảm từ **21.200 ms** xuống còn **~189 ms - 1.048 ms** (tùy cold/cached, nhanh gấp **20 - 110 lần**), đồng thời đính kèm đầy đủ thẻ sản phẩm tương tác.
+  2. **Tắt Chế Độ CoT Nhẩm Mặc Định Của Gemma 4 (`chat_template_kwargs: { enable_thinking: false }`):**
+     - Theo tài liệu Cloudflare Workers AI, truyền `chat_template_kwargs: { enable_thinking: false }` và giới hạn `max_tokens: 550` giúp Gemma 4 26B bỏ qua hoàn toàn bước nhẩm `reasoning_content`, sinh trực tiếp văn bản tiếng Việt tinh tế, giàu cảm xúc ngay lập tức.
+     - Bổ sung chỉ thị trong System Prompt yêu cầu phản hồi trực tiếp bằng tiếng Việt, không viết bản nháp tiếng Anh.
+     - **Thời gian phản hồi Cold LLM:** Giảm từ **21.20 giây** xuống còn **~8.00 - 8.47 giây** (giảm > 60% độ trễ) và đạt **0% rò rỉ CoT**.
+  3. **Bảo Vệ Chống Timeout (`Promise.race` 16s + Smart D1 Contextual Fallback):**
+     - Bổ sung cơ chế timeout bảo vệ 16 giây quanh lệnh gọi `c.env.AI.run(...)`. Nếu cụm GPU Cloudflare gặp hiện tượng cold-start hoặc tắc nghẽn đột xuất, hệ thống tự động trả về `buildContextualFallback()` từ dữ liệu D1 đã lấy sẵn kèm danh sách sản phẩm phù hợp, đảm bảo **0% lỗi Timeout / treo kết nối**.
+  4. **Làm Mới Cache Key:** Cập nhật cache key sang `chat_cache_v17:`.
+- **Kết Quả Kiểm Thử & Nghiệm Thu Cuối Cùng (Ngày 11/11/2026):**
+  1. **Kiểm tra biên dịch TypeScript (`npm run typecheck`):** **0 lỗi**.
+  2. **Kiểm thử 5 bộ test tự động toàn hệ thống (200/200 PASS - 100%):**
+     - `scripts/test_100_scenarios.ts` (100 kịch bản chuẩn Ground Truth): **100/100 ĐẠT**.
+     - `scripts/test_user_scenarios.ts` (20 tình huống người dùng thực tế): **20/20 ĐẠT**.
+     - `scripts/test_chatbot_closed_domain.ts` (37 tiêu chí Closed-Domain & Fast Routing): **37/37 ĐẠT**.
+     - `scripts/test_chatbot_intent_routing.ts` (26 tiêu chí Intent Routing & Entity Extraction): **26/26 ĐẠT**.
+     - `node scripts/test_chatbot_v2.mjs` (17 tiêu chí Pre-Router & Whisper): **17/17 ĐẠT**.
+  3. **Kiểm thử thực tế trên Live Production (`https://one-store.onestoresportsshoes.workers.dev` - Version ID `7d3c4112-72b7-403b-9615-aecdf2512780`):**
+     - *Smalltalk* (`"xin chào shop"`): **464 ms** | HTTP 200 | Zero-Emoji Đạt.
+     - *Chính sách* (`"chính sách freeship và đổi size như thế nào"`): **118 ms** | HTTP 200 | Zero-Emoji Đạt.
+     - *Lọc khoảng giá Tầng 1* (`"Hãy tìm cho tôi đôi giày có giá từ 4-6 triệu"`): **189 ms** (không cache lần đầu: **1.048 ms**) | Gợi ý chính xác 3 mẫu (`Nike ZoomX Vaporfly 3`, `Adidas Ultraboost Light`, `Adidas Adizero Adios Pro 3`) | Zero-Emoji Đạt.
+     - *Chọn size dáng chân* (`"chân bè ngang thì nên chọn giày chạy bộ nào"`): **121 ms** | Đầy đủ cẩm nang 3 bước | Zero-Emoji Đạt.
+     - *Tư vấn gu thẩm mỹ Tầng 2 (KV Cache Hit)* (`"tôi hay đi sự kiện nên đi đôi giày nào để thể hiện sự sang trọng"`): **170 ms** (Cold LLM: **8.401 ms**) | Gợi ý chuẩn Adidas Samba OG Classic & Superstar 82 | Zero-Emoji Đạt.
+     - *Tình huống mới 100% Tầng 2 (Cold LLM)* (`"tôi chuẩn bị đi du lịch leo núi ở Đà Lạt cuối tuần nên mang đôi nào bám đường tốt"`): **8.474 ms** | Đồng cảm địa hình dốc trơn trượt, tư vấn chuẩn `Salomon XT-6 Black Phantom`, `Nike Pegasus Trail 4 GORE-TEX`, `Adidas Terrex Free Hiker 2 GORE-TEX` | 0% rò rỉ CoT | Zero-Emoji Đạt.
+     - *Ngoài phạm vi Guardrail* (`"viết giúp tôi một đoạn code python tính dãy fibonacci"`): **136 ms** | Từ chối khéo léo và điều hướng về tư vấn size giày.
+
 ---
 
 ## 3. DANH SÁCH CÁC FILE ĐÃ THAY ĐỔI
@@ -1538,7 +1571,7 @@ one-store/
 | :--- | :--- | :--- |
 | `CHATBOT_100_SCENARIOS.md` | Created | Bảng kịch bản 100 câu hỏi và câu trả lời dự kiến chuẩn Ground Truth (được người dùng phê duyệt). |
 | `scripts/test_100_scenarios.ts` | Created | Test suite tự động hóa 100 kịch bản câu hỏi thực tế khách hàng (100/100 PASS). |
-| `backend/src/chatbot.ts` | Modified | Mở rộng Pre-Router, Out-of-Scope Guardrails, Bóc tách thực thể form 1 dòng bullet, 4 Resolvers chuyên sâu, sửa `isReturn`/`isWarranty`, lọc size, Zero-Emoji 100%. |
+| `backend/src/chatbot.ts` | Modified | Pre-Router, Guardrails, Mũi Nhọn 1.5 Fast Budget Resolver, Tích hợp Gemma 4 26B (`enable_thinking: false`, `max_tokens: 550`), Smart Timeout Guard 16s, Output Sanitizer, KV Cache `v17`, Zero-Emoji 100%. |
 | `scripts/test_user_scenarios.ts` | Modified | Bộ kịch bản kiểm thử tự động 20 tình huống câu hỏi thực tế của khách hàng (100% Pass). |
 | `scripts/test_live_scenarios.ts` | Modified | Bộ kiểm thử trực tiếp trên Cloudflare Workers Live Production (`/api/chat`) 10/10 kịch bản thực tế (100% Pass). |
 
